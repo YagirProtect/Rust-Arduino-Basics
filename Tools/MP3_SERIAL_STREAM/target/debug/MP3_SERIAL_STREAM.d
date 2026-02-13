@@ -1,0 +1,1 @@
+C:\Users\YaroSlave\RustroverProjects\ARDUINO\Tools\MP3_SERIAL_STREAM\target\debug\MP3_SERIAL_STREAM.exe: C:\Users\YaroSlave\RustroverProjects\ARDUINO\Tools\MP3_SERIAL_STREAM\src\anyhow.rs C:\Users\YaroSlave\RustroverProjects\ARDUINO\Tools\MP3_SERIAL_STREAM\src\main.rs
