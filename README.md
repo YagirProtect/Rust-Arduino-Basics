@@ -1,193 +1,305 @@
-# Arduino Uno (ATmega328P) playground in Rust
+# Rust Arduino Basics (Arduino Uno / ATmega328P)
 
-This repository is a small **Rust + `arduino-hal`** playground for **Arduino Uno**.
-It contains:
+Small **Rust + `arduino-hal`** playground for **Arduino Uno** (ATmega328P @ 16 MHz).
 
-- **Firmware** (`Arduino/`) – `#![no_std]` examples + a tiny “mini-std” layer (timer + serial logging).
-- **PC tools** (`Tools/`) – helper utilities (e.g. a serial streamer for raw 8‑bit audio).
+- **Firmware** (`Arduino/`) — `#![no_std]` examples + a tiny “mini-std” layer (timer + serial logging).
+- **PC tools** (`Tools/`) — helper utilities (e.g. a serial streamer for raw 8‑bit audio).
 
 > Target board: **Arduino Uno / ATmega328P @ 16 MHz**.
 
 ---
 
-## What’s inside
+## Quick start
 
-### Firmware (`Arduino/`)
+```bash
+cd Arduino
+# edit Ravedude.toml -> set your serial port (COM5, /dev/ttyACM0, ...)
+cargo build
+cargo run
+```
 
-**Tiny “std” layer**
-
-- `std/global_timer.rs` – `millis()` via **Timer0 CTC + ISR** (1 ms tick).
-- `std/io.rs` – UART logger (`uFmt` + `heapless::String`).
-- `std/math.rs` – a couple of helpers (`inverse_lerp`, `lerp`, `normalize`).
-
-**Modules (drivers-ish)**
-
-- `modules/joystick.rs` – analog joystick (X/Y) + optional SW button.
-- `modules/light_sensor.rs` – analog light sensor with optional power-gating pin.
-- `modules/water_sensor.rs` – BFS water sensor (analog) with **power-gating** to reduce corrosion.
-
-### Tools (`Tools/`)
-
-- `Tools/MP3_SERIAL_STREAM/` – streams a `*.raw` **u8 mono PCM** file to a COM port at real-time speed.
+Notes:
+- `.cargo/config.toml` sets `target = "avr-none"` and uses `ravedude` as the runner.
+- `GlobalTimer` reconfigures **Timer0**. If you rely on Arduino-core `millis()/delay()`, don’t.
+- Use `wrapping_sub` for time deltas (u32 wraps ~ every 49.7 days).
 
 ---
 
 ## Prerequisites
 
-### Firmware toolchain (Windows/macOS/Linux)
-
 1) **Rust nightly** pinned in `Arduino/rust-toolchain.toml`.
 
 2) AVR tooling:
-
 - `avr-gcc`
 - `avr-libc`
 - `avrdude`
 
 3) Flasher/runner:
+- `ravedude`
 
-- [`ravedude`](https://crates.io/crates/ravedude)
-
-The canonical setup steps are documented in the `avr-hal` README:
-https://github.com/Rahix/avr-hal#readme
-
----
-
-## Build & flash firmware
-
-From the repo root:
-
-```bash
-cd Arduino
-```
-
-1) Edit `Arduino/Ravedude.toml` and set the right `port` (e.g. `COM5`).
-
-2) Build:
-
-```bash
-cargo build
-```
-
-3) Flash + open serial console:
-
-```bash
-cargo run
-```
-
-Notes:
-
-- `.cargo/config.toml` sets `target = "avr-none"` and uses `ravedude` as the runner.
-- `GlobalTimer` reconfigures **Timer0**. If you rely on Arduino-core `millis()/delay()`, don’t.
-- Time comparisons should use `wrapping_sub` (counter is `u32` and wraps ~ every 49.7 days).
+Canonical setup docs: https://github.com/Rahix/avr-hal#readme
 
 ---
 
 ## Wiring cheatsheet
 
-### Analog joystick (HW-504 / similar)
+### I²C bus (shared by LCD + sensors)
+On **Uno/Nano (ATmega328P)**:
+- `SDA` → `A4`
+- `SCL` → `A5`
 
+All I²C devices connect **in parallel** to the same SDA/SCL and share **GND**.  
+Each device must have its own **I²C address**.
+
+### LCD1602 + I²C backpack (PCF8574)
 - `VCC` → `5V`
 - `GND` → `GND`
-- `VRx` → `A0`
-- `VRy` → `A1`
-- `SW`  → e.g. `D7` (**INPUT_PULLUP**)
+- `SDA` → `A4`
+- `SCL` → `A5`
 
-### Light sensor (LDR module / analog out)
-
-- `AO` → `A0`
-- Optional: power-gate from `D7` (module VCC controlled by a GPIO)
-
-### BFS water sensor (analog)
-
-- `S` / `AO` → `A0`
-- `GND` → `GND`
-- `VCC` → controlled by `D7` (power-gating pin)
-
-Power-gating is recommended for “exposed trace” sensors to reduce electrolysis/corrosion.
+Common addresses: `0x27`, `0x3F`  
+If backlight is on but no text: adjust the **contrast potentiometer**.
 
 ---
 
-## Usage examples
+## Firmware modules (expand)
 
-### Joystick
+### Tiny “mini-std” layer
 
-`modules/joystick.rs` contains a commented example; the idea is:
+<details>
+  <summary><b>GlobalTimer</b> — Timer0 millis (CTC + Compare A ISR)</summary>
 
-```rust
-// X = A0, Y = A1, SW = D7 (pull-up)
-let analog0 = pins.a0.into_analog_input(&mut adc);
-let analog1 = pins.a1.into_analog_input(&mut adc);
-let button  = pins.d7.into_pull_up_input();
+**What:** global millisecond counter backed by **Timer0** interrupt.  
+**Why:** schedule periodic tasks without blocking `delay()`.
 
-let mut joystick = Joystick::new(Some(analog0), Some(analog1), Some(button), 8);
+**Notes**
+- ATmega328P @ 16 MHz, prescaler 64, `OCR0A=249` → ~1 ms tick
+- Requires interrupts enabled after init
+- `u32` wraps naturally → use `wrapping_sub`
 
-loop {
-    let now = timer.millis();
-    joystick.update(now, &mut adc);
-    // joystick.x_raw(), joystick.y_raw(), joystick.button(), joystick.button_pressed()
-}
-```
+**Example**
+  ```rust
+  let timer = GlobalTimer::new(&dp.TC0);
+  enable_interrupts();
 
-### Water sensor (BFS)
+  let mut last = timer.millis();
+  loop {
+      let now = timer.millis();
+      if now.wrapping_sub(last) >= 200 {
+          last = now;
+          // do something every 200 ms
+      }
+  }
+  ```
+</details>
 
-```rust
-let mut power = pins.d7.into_output();
-let analog0 = pins.a0.into_analog_input(&mut adc);
-let mut water = WaterSensorBFS::new(power, analog0, 500);
+<details>
+  <summary><b>IO logger</b> — UART logging (ufmt + heapless)</summary>
 
-loop {
-    let now = timer.millis();
-    water.update(now, &mut adc);
-    if water.is_read() {
-        // water.last_data()  (0..1023 on Uno ADC)
-    }
-}
-```
+**What:** tiny serial logger without `std`, using `ufmt` macros and a `heapless::String` buffer.
 
-> ADC note: Uno’s ADC is **10-bit** → codes are **0..1023** (1024 levels).
+**Example**
+  ```rust
+  use ufmt::uwriteln;
+
+  io.clear();
+  uwriteln!(io.str(), "x={}, y={}", x, y).ok();
+  io.log(); // sends buffer over UART
+  ```
+</details>
+
+<details>
+  <summary><b>Math helpers</b> — small no_std utilities</summary>
+
+**What:** small helpers like `inverse_lerp`, `lerp`, `normalize` to keep drivers clean.
+
+**Example**
+  ```rust
+  let t = inverse_lerp(0.0, 1023.0, raw as f32); // 0..1
+  let v = lerp(-1.0, 1.0, t);                     // -1..1
+  ```
+</details>
 
 ---
 
-## Tool: Serial raw audio streamer
+### Drivers (“modules”)
 
-Located at `Tools/MP3_SERIAL_STREAM/`.
+<details>
+  <summary><b>LCD1602 (HD44780) over I²C (PCF8574)</b> — blocking + queued (“async”)</summary>
 
-This tool streams a `*.raw` file (unsigned 8‑bit mono PCM) to a serial port at the specified sample rate.
+**What:** character LCD driver through an I²C backpack (PCF8574).  
+**Why “slow”:** HD44780 has slow commands (`clear/home` ~1.5ms), and with PCF8574 each char becomes multiple I²C writes.
 
-### Build & run
+**Tips**
+- Don’t `clear()` every frame: update only what changed.
+- If text missing: adjust **contrast** (pot) and verify address (`0x27` / `0x3F`).
+- Async mode = enqueue ops + call `update(now, &mut i2c)` in the loop.
 
-```bash
-cd Tools/MP3_SERIAL_STREAM
-cargo +stable run --release -- COM5 bad_apple.raw 250000 8000 256
-```
+**Blocking example**
+  ```rust
+  let mut lcd = ScreenLCD1602::new(0x27, &mut i2c, EMode::Strait);
+  lcd.set_cursor(&mut i2c, 0, 0);
+  lcd.print_str(&mut i2c, "Hello!");
+  ```
+
+**Queued example**
+  ```rust
+  use core::fmt::Write;
+
+  let mut lcd = ScreenLCD1602::new(0x27, &mut i2c, EMode::Async);
+
+  lcd.clear_line();
+  write!(lcd.get_line(), "pressed!!!").unwrap();
+  lcd.print(&mut i2c); // enqueue clear + cursor + bytes
+
+  loop {
+      let now = timer.millis();
+      lcd.update(now, &mut i2c);
+  }
+  ```
+</details>
+
+<details>
+  <summary><b>Joystick HW-504</b> — analog X/Y + SW button</summary>
+
+**What:** reads joystick axes via ADC and optional SW button via `INPUT_PULLUP`.
+
+**Wiring**
+- `VRx` → `A0`, `VRy` → `A1`, `SW` → e.g. `D7` (pull-up)
+
+**Example**
+  ```rust
+  let x = pins.a0.into_analog_input(&mut adc);
+  let y = pins.a1.into_analog_input(&mut adc);
+  let sw = pins.d7.into_pull_up_input();
+
+  let mut js = Joystick::new(Some(x), Some(y), Some(sw), 8);
+
+  loop {
+      let now = timer.millis();
+      js.update(now, &mut adc);
+      // js.x_raw(), js.y_raw(), js.button(), js.button_pressed()
+  }
+  ```
+</details>
+
+<details>
+  <summary><b>Light sensor (LDR)</b> — analog read + optional power gating</summary>
+
+**What:** analog light sensor module (LDR) read via ADC.  
+**Optional:** power the module from a GPIO to reduce idle draw / for experiments.
+
+**Example**
+  ```rust
+  let analog = pins.a0.into_analog_input(&mut adc);
+  let mut sensor = LightSensorResistor::new(analog, /*read_rate_ms*/ 50);
+
+  loop {
+      let now = timer.millis();
+      sensor.update(now, &mut adc);
+      let raw = sensor.last_data(); // 0..1023
+  }
+  ```
+</details>
+
+<details>
+  <summary><b>BFS Water Sensor</b> — analog + power-gating (anti-corrosion)</summary>
+
+**What:** reads BFS water sensor (exposed traces) via ADC.  
+**Power-gating:** recommended to reduce electrolysis/corrosion (turn VCC on only during read).
+
+**Example**
+  ```rust
+  let mut power = pins.d7.into_output();
+  let analog = pins.a0.into_analog_input(&mut adc);
+
+  let mut water = WaterSensorBFS::new(power, analog, 500);
+
+  loop {
+      let now = timer.millis();
+      water.update(now, &mut adc);
+      if water.is_read() {
+          let raw = water.last_data(); // 0..1023
+      }
+  }
+  ```
+</details>
+
+<details>
+  <summary><b>Analog temperature sensor (LM25/LM35-style)</b> — ADC to °C</summary>
+
+**What:** simple analog temperature sensor using ADC (10-bit on Uno).
+
+**Example**
+  ```rust
+  let analog = pins.a0.into_analog_input(&mut adc);
+  let mut t = TemperatureSensorLM25::new(analog, 250);
+
+  loop {
+      let now = timer.millis();
+      t.update(now, &mut adc);
+      let (c_int, c_frac) = t.to_celsius(); // e.g. (23, 4) => 23.4°C
+  }
+  ```
+</details>
+
+---
+
+## Tools (expand)
+
+<details>
+  <summary><b>Serial RAW audio streamer</b> — Tools/MP3_SERIAL_STREAM</summary>
+
+Streams `*.raw` unsigned **u8 mono PCM** to a serial port at real-time speed.
+
+**Run**
+  ```bash
+  cd Tools/MP3_SERIAL_STREAM
+  cargo +stable run --release -- COM5 bad_apple.raw 250000 8000 256
+  ```
 
 Args:
-
 1) `PORT`  – `COM5`, `/dev/ttyACM0`, ...
 2) `FILE`  – path to `*.raw`
 3) `BAUD`  – default `250000`
 4) `RATE`  – samples/sec, default `8000`
 5) `CHUNK` – bytes per write, default `256`
 
-### Convert audio to RAW
+**Convert with ffmpeg**
+  ```bash
+  ffmpeg -i input.mp3 -ac 1 -ar 8000 -f u8 output.raw
+  ```
+</details>
 
-If you have `ffmpeg` installed:
+---
 
-```bash
-ffmpeg -i input.mp3 -ac 1 -ar 8000 -f u8 output.raw
-```
+## Troubleshooting
 
-> To actually *play* streamed audio you’ll need firmware that reads serial into a ring buffer and outputs PWM (or a DAC).
+<details>
+  <summary><b>I²C “no response” / device not detected</b></summary>
+
+- Check **GND** (loose ground is #1).
+- Verify SDA/SCL are on **A4/A5** (Uno/Nano).
+- Try the other LCD address (`0x27` ↔ `0x3F`).
+- Keep wires short; if unstable, reduce I²C speed (e.g. 100 kHz).
+</details>
+
+<details>
+  <summary><b>LCD backlight on but no text</b></summary>
+
+- Adjust **contrast** potentiometer (it can look blank otherwise).
+- Confirm correct I²C address.
+- Some PCF8574 backpacks use a different pin mapping (rare, but happens).
+</details>
 
 ---
 
 ## Licenses
 
-Firmware is dual-licensed under either of:
+Dual-licensed under either of:
 
-- Apache License 2.0 — `Arduino/LICENSE-APACHE`
-- MIT License — `Arduino/LICENSE-MIT`
+- Apache License 2.0 — `LICENSE-APACHE`
+- MIT License — `LICENSE-MIT`
 
 ---
 
