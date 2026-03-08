@@ -2,3 +2,4 @@
 pub mod light_sensor_resistor;
 pub mod temperature_sensor_lm25;
 pub mod joystick_hw504;
+pub mod screen_lcd1602;

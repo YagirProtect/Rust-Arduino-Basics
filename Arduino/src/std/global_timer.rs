@@ -93,6 +93,7 @@ impl GlobalTimer {
 /// Timer0 Compare Match A ISR.
 ///
 /// Increments the global millisecond counter.
+/// Needs: #![feature(abi_avr_interrupt)]
 #[avr_device::interrupt(atmega328p)]
 fn TIMER0_COMPA() {
     avr_device::interrupt::free(|cs| {
