@@ -15,7 +15,7 @@
 //! by pulsing `E` (Enable) high then low.
 //!
 //! ## Modes
-//! - [`EMode::Strait`]: blocking calls; init performs `delay_ms(...)` waits.
+//! - [`EMode::Linear`]: blocking calls; init performs `delay_ms(...)` waits.
 //! - [`EMode::Async`]: commands/data are enqueued and executed via [`ScreenLCD1602::update`].
 //!
 //! ## Internal line buffer
@@ -27,7 +27,7 @@
 
 
 use crate::modules::screen_lcd1602::screen_alcd1602_async::{Op, OpQueue};
-use crate::modules::screen_lcd1602::screen_lcd1602::EMode::Strait;
+use crate::modules::screen_lcd1602::screen_lcd1602::EMode::Linear;
 use crate::modules::screen_lcd1602::screen_lcd1602cmd::LcdCmd;
 use core::cmp::PartialEq;
 use embedded_hal::i2c::I2c;
@@ -36,11 +36,11 @@ use heapless::String;
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 /// LCD driver mode.
 ///
-/// - `Strait`: blocking operations (simple).
+/// - `Linear`: blocking operations (simple).
 /// - `Async`: queue operations and call [`ScreenLCD1602::update`] to progress.
 
 pub enum EMode {
-    Strait,
+    Linear,
     Async,
 }
 
@@ -103,7 +103,7 @@ impl ScreenLCD1602 {
     }
     /// Progress queued operations in async mode.
     ///
-    /// Call this from your main loop. In `Strait` mode this is a no-op.
+    /// Call this from your main loop. In `Linear` mode this is a no-op.
 
     pub fn update(&mut self, now_ms: u32, i2c: &mut arduino_hal::I2c) {
         if self.mode != EMode::Async {
@@ -135,10 +135,10 @@ impl ScreenLCD1602 {
         }
     }
 
-    /// Send a command (blocking in Strait, queued in Async).
+    /// Send a command (blocking in Linear, queued in Async).
     pub fn command(&mut self, i2c: &mut arduino_hal::I2c, cmd: LcdCmd) {
         match self.mode {
-            EMode::Strait => self.command_blocking(i2c, cmd as u8),
+            EMode::Linear => self.command_blocking(i2c, cmd as u8),
             EMode::Async => {
                 let _ = self.q.push(Op::Cmd(cmd as u8));
                 if cmd == LcdCmd::ClearDisplay || cmd == LcdCmd::ReturnHome {
@@ -161,7 +161,7 @@ impl ScreenLCD1602 {
     pub fn clear(&mut self, i2c: &mut arduino_hal::I2c) {
         self.command(i2c, LcdCmd::ClearDisplay);
     }
-    
+
     /// Turn the display off.
     pub fn display_off(&mut self, i2c: &mut arduino_hal::I2c) {
         self.command(i2c, LcdCmd::DisplayOff);
@@ -183,7 +183,7 @@ impl ScreenLCD1602 {
         let cmd = 0x80 | (col + row_offsets[r]);
 
         match self.mode {
-            EMode::Strait => self.command_blocking(i2c, cmd),
+            EMode::Linear => self.command_blocking(i2c, cmd),
             EMode::Async => {
                 let _ = self.q.push(Op::Cmd(cmd));
             }
@@ -217,7 +217,7 @@ impl ScreenLCD1602 {
                     // ignore
                 }
                 _ => {
-                    if (self.mode == Strait) {
+                    if (self.mode == Linear) {
                         self.send_byte(i2c, b, true);
                     }else{
                         let _ = self.q.push(Op::Data(b));
@@ -285,7 +285,7 @@ impl ScreenLCD1602 {
 }
 
 
-//Mode: Strait
+//Mode: Linear
 // #[arduino_hal::entry]
 // fn main() -> ! {
 //     let dp = arduino_hal::Peripherals::take().unwrap();
@@ -298,7 +298,7 @@ impl ScreenLCD1602 {
 //         pins.a5.into_pull_up_input(),
 //         100_000,
 //     );
-//     let mut screen = ScreenLCD1602::new(0x27, &mut i2c, EMode::Strait);
+//     let mut screen = ScreenLCD1602::new(0x27, &mut i2c, EMode::Linear);
 //
 //     let mut val = 1337;
 //     write!(screen.get_line(), "{}", val).unwrap();

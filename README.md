@@ -143,15 +143,15 @@ io.log(); // sends the buffer + newline
 **API in this repo**
 - `ScreenLCD1602::get_line()` — clears and returns a `heapless::String<64>` scratch buffer.
 - `ScreenLCD1602::print(&mut i2c)` — prints the current buffer, interpreting `\n` as the second row.
-- `EMode::Strait` — blocking (bytes sent immediately).
+- `EMode::Linear` — blocking (bytes sent immediately).
 - `EMode::Async` — enqueues commands/data; you must call `update(now_ms, &mut i2c)` in the main loop.
 
-**Blocking example (Strait)**
+**Blocking example (Linear)**
 ```rust
 use core::fmt::Write;
 use crate::modules::screen_lcd1602::screen_lcd1602::{EMode, ScreenLCD1602};
 
-let mut lcd = ScreenLCD1602::new(0x27, &mut i2c, EMode::Strait);
+let mut lcd = ScreenLCD1602::new(0x27, &mut i2c, EMode::Linear);
 write!(lcd.get_line(), "Hello!\nWorld").unwrap();
 lcd.print(&mut i2c);
 ```
