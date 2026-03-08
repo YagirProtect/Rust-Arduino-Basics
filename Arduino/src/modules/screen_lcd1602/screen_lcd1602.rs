@@ -1,4 +1,32 @@
-﻿use crate::modules::screen_lcd1602::screen_alcd1602_async::{Op, OpQueue};
+//! LCD1602 driver (HD44780) over an I²C backpack (PCF8574).
+//!
+//! The LCD itself is a parallel device. The backpack exposes 8 GPIO pins over I²C and is
+//! typically wired like this (most common mapping):
+//! - P0 → RS
+//! - P1 → RW
+//! - P2 → E
+//! - P3 → Backlight
+//! - P4 → D4
+//! - P5 → D5
+//! - P6 → D6
+//! - P7 → D7
+//!
+//! In 4-bit mode each byte is sent as two nibbles (high then low). Each nibble is "latched"
+//! by pulsing `E` (Enable) high then low.
+//!
+//! ## Modes
+//! - [`EMode::Strait`]: blocking calls; init performs `delay_ms(...)` waits.
+//! - [`EMode::Async`]: commands/data are enqueued and executed via [`ScreenLCD1602::update`].
+//!
+//! ## Internal line buffer
+//! The driver uses a `heapless::String<64>` as a formatting scratchpad. In the current
+//! implementation `get_line()` clears the buffer before returning it.
+//!
+//! ## Newlines
+//! `print()` interprets `\n` as move to the second row (`row=1`) and `\r` as ignored.
+
+
+use crate::modules::screen_lcd1602::screen_alcd1602_async::{Op, OpQueue};
 use crate::modules::screen_lcd1602::screen_lcd1602::EMode::Strait;
 use crate::modules::screen_lcd1602::screen_lcd1602cmd::LcdCmd;
 use core::cmp::PartialEq;
@@ -6,10 +34,20 @@ use embedded_hal::i2c::I2c;
 use heapless::String;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+/// LCD driver mode.
+///
+/// - `Strait`: blocking operations (simple).
+/// - `Async`: queue operations and call [`ScreenLCD1602::update`] to progress.
+
 pub enum EMode {
     Strait,
     Async,
 }
+
+/// LCD1602 driver handle.
+///
+/// Owns the I²C address and internal state (backlight, mode, optional queue and line buffer).
+/// Use [`ScreenLCD1602::get_line`] + `core::fmt::Write` to format text without allocation.
 
 pub struct ScreenLCD1602 {
     addr: u8,
@@ -24,6 +62,11 @@ pub struct ScreenLCD1602 {
 }
 
 impl ScreenLCD1602 {
+    /// Create and initialize the LCD.
+    ///
+    /// Performs the standard HD44780 4-bit init ritual (`0x03`×3, then `0x02`),
+    /// followed by function set / display off / clear / entry mode / display on.
+
     pub fn new(addr: u8, i2c: &mut arduino_hal::I2c, mode: EMode) -> Self {
         let mut screen = Self {
             addr,
@@ -58,6 +101,10 @@ impl ScreenLCD1602 {
 
         screen
     }
+    /// Progress queued operations in async mode.
+    ///
+    /// Call this from your main loop. In `Strait` mode this is a no-op.
+
     pub fn update(&mut self, now_ms: u32, i2c: &mut arduino_hal::I2c) {
         if self.mode != EMode::Async {
             return;
@@ -88,6 +135,7 @@ impl ScreenLCD1602 {
         }
     }
 
+    /// Send a command (blocking in Strait, queued in Async).
     pub fn command(&mut self, i2c: &mut arduino_hal::I2c, cmd: LcdCmd) {
         match self.mode {
             EMode::Strait => self.command_blocking(i2c, cmd as u8),
@@ -100,22 +148,31 @@ impl ScreenLCD1602 {
         }
     }
 
+    /// Get a mutable handle to the internal formatting buffer.
+    ///
+    /// Current behavior: clears the buffer before returning it.
+
     pub fn get_line(&mut self) -> &mut String<64>{
         self.line.clear();
         return &mut self.line
     }
 
+    /// Clear the display (`0x01`).
     pub fn clear(&mut self, i2c: &mut arduino_hal::I2c) {
         self.command(i2c, LcdCmd::ClearDisplay);
     }
+    
+    /// Turn the display off.
     pub fn display_off(&mut self, i2c: &mut arduino_hal::I2c) {
         self.command(i2c, LcdCmd::DisplayOff);
     }
 
+    /// Turn the display on.
     pub fn display_on(&mut self, i2c: &mut arduino_hal::I2c) {
         self.command(i2c, LcdCmd::DisplayOn);
     }
 
+    /// Set cursor to point.
     pub fn set_cursor(&mut self, i2c: &mut arduino_hal::I2c, col: u8, row: u8) {
         let row_offsets = [0x00u8, 0x40u8, 0x14u8, 0x54u8];
         let r = if (row as usize) < row_offsets.len() {
@@ -132,6 +189,11 @@ impl ScreenLCD1602 {
             }
         }
     }
+
+    /// Print the current line buffer to the LCD.
+    ///
+    /// Interprets `\n` as move to row 1 and ignores `\r`.
+    /// In async mode, bytes are enqueued (requires [`ScreenLCD1602::update`]).
 
     pub fn print(&mut self, i2c: &mut arduino_hal::I2c) {
 

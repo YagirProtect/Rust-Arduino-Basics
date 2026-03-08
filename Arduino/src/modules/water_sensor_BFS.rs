@@ -1,10 +1,33 @@
-﻿use arduino_hal::adc::AdcChannel;
+//! BFS water sensor helper (analog output) with power gating.
+//!
+//! This driver is designed for common cheap "water level" / "rain" analog sensors.
+//!
+//! ## Why power is switched
+//! Keeping these probes powered continuously can cause electrolysis/corrosion and noisy readings.
+//! A common trick is to:
+//! - set `power_pin` HIGH,
+//! - read ADC,
+//! - set `power_pin` LOW.
+//!
+//! The driver does exactly that in [`WaterSensorBFS::update`].
+//!
+//! ## Timing
+//! Non-blocking scheduling is done using `read_rate` milliseconds and `wrapping_sub`.
+
+
+use arduino_hal::adc::AdcChannel;
 use arduino_hal::hal::Atmega;
 use arduino_hal::pac::ADC as AdcPeriph;
 use arduino_hal::port::mode::{Analog, Output};
 use arduino_hal::port::{mode, Pin, PinOps};
 
 const MAX_INPUT_VALUE: u16 = 1024;
+/// BFS water sensor reader with power gating.
+///
+/// Powers the probe only during measurement:
+/// `HIGH -> read ADC -> LOW`, which helps reduce corrosion and noise.
+/// Use [`WaterSensorBFS::percent`] to get a normalized value.
+
 pub struct WaterSensorBFS<PW, OT> {
     power_pin: Pin<mode::Output, PW>,
     output_pin: Pin<Analog, OT>,
@@ -23,6 +46,7 @@ where
     OT: PinOps,
     Pin<Analog, OT>: AdcChannel<Atmega, AdcPeriph>,
 {
+    /// Create a new water sensor reader (power pin + analog output + read rate in ms).
     pub fn new(power_pin: Pin<Output, PW>, output_pin: Pin<Analog, OT>, read_rate: u32) -> Self {
         Self{
             power_pin,
@@ -33,6 +57,10 @@ where
             is_read: false,
         }
     }
+
+    /// Perform a powered measurement if `read_rate` elapsed.
+    ///
+    /// Sets power HIGH, reads ADC, then sets power LOW.
 
     pub fn update(&mut self, time: u32, adc: &mut arduino_hal::Adc) {
         if (time.wrapping_sub(self.time) >= self.read_rate as u32){
@@ -47,6 +75,7 @@ where
         }
     }
 
+    /// True only on the tick when a new reading was taken.
     pub fn is_read(&self) -> bool{
         self.is_read
     }
@@ -55,6 +84,7 @@ where
         self.last_data
     }
 
+    /// Normalized value in `[0,1]` using `MAX_INPUT_VALUE` as full scale.
     pub fn percent(&self)-> f32{
         return self.last_data as f32 / MAX_INPUT_VALUE as f32;
     }

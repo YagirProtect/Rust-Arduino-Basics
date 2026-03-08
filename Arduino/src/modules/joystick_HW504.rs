@@ -1,10 +1,35 @@
-﻿use arduino_hal::port::{mode, Pin, PinOps};
+//! HW-504 joystick driver (analog X/Y + push button).
+//!
+//! Reads the HW-504 joystick module:
+//! - `X` and `Y` potentiometers via ADC (0..1023).
+//! - `SW` push button (usually active-low, use pull-up).
+//!
+//! ## Design
+//! - Supports **optional pins** (`Option<Pin<...>>`) so you can use only X, only Y, only SW,
+//!   or any combination.
+//! - `update(time_ms, adc)` samples at `read_rate` milliseconds using `wrapping_sub`.
+//!
+//! ## Notes
+//! - ADC readings are typically `0..=1023` for 10-bit AVR ADC.
+//! - Button is treated as **pressed when low** (`is_low()`), assuming pull-up wiring.
+//!
+//! ## Example
+//! See the commented example at the bottom of the file.
+
+
+use arduino_hal::port::{mode, Pin, PinOps};
 use arduino_hal::adc::{AdcChannel, Channel};
 use arduino_hal::hal::Atmega;
 use arduino_hal::pac::ADC as AdcPeriph;
 use arduino_hal::port::mode::{Analog, PullUp};
 
 const MAX_INPUT_VALUE: u16 = 1024;
+
+/// HW-504 joystick reader (analog X/Y + optional SW button).
+///
+/// The type stores the last sampled values and exposes lightweight getters.
+/// Call [`JoystickHW504::update`] periodically with a millisecond timestamp.
+/// Sampling happens at most once per `read_rate` milliseconds.
 
 pub struct JoystickHW504<X, Y, SW>{
     x: u16,
@@ -28,6 +53,15 @@ where
     SW: PinOps,
 {
 
+    /// Create a joystick instance.
+    ///
+    /// Pins are optional so you can omit unused channels:
+    /// - `pin_x`: analog input for X axis (e.g. `A0` in analog mode)
+    /// - `pin_y`: analog input for Y axis (e.g. `A1` in analog mode)
+    /// - `pin_tap`: digital input with pull-up for the SW button (active-low)
+    ///
+    /// `read_rate` is the minimum interval between ADC samples, in milliseconds.
+
     pub fn new (pin_x: Option<Pin<Analog, X>>, pin_y: Option<Pin<Analog, Y>>, pin_tap: Option<Pin<mode::Input<PullUp>, SW>>, read_rate: u16) -> Self{
 
         Self {
@@ -44,6 +78,14 @@ where
         }
     }
 
+
+    /// Update internal readings if `read_rate` elapsed.
+    ///
+    /// - `time`: current time in milliseconds (monotonic, may wrap)
+    /// - `adc`: shared ADC peripheral
+    ///
+    /// Uses `wrapping_sub` so it remains correct across `u32` overflow.
+    /// `button_pressed()` becomes true only on the **rising edge** of a press.
 
     pub fn update(&mut self, time: u32, adc: &mut arduino_hal::Adc){
         self.tap_pressed = false;
@@ -68,13 +110,17 @@ where
         }
     }
 
+    /// Last sampled raw X reading (ADC units).
     pub fn x_raw(&self) -> u16 {
         self.x
     }
+    /// Last sampled raw Y reading (ADC units).
     pub fn y_raw(&self) -> u16 {
         self.y
     }
+    /// Current button state (true when pressed).
     pub fn button(&self) -> bool {self.tap}
+    /// Edge-triggered press event (true for one update tick).
     pub fn button_pressed(&self) -> bool {self.tap_pressed}
 }
 

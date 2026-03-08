@@ -1,10 +1,33 @@
-﻿use arduino_hal::adc::AdcChannel;
+//! Analog temperature sensor (LM25/LM35-style) helper.
+//!
+//! This module reads an analog temperature sensor that outputs voltage proportional to temperature.
+//!
+//! ## Conversion model
+//! The implementation assumes:
+//! - 10-bit ADC (`0..=1023`)
+//! - `Vref = 5.0V` (5000 mV)
+//! - sensor scale: **10 mV per °C** (typical for LM35)
+//!
+//! `to_celsius()` returns `(integer_part, fractional_part)` where `fractional_part` is 0..9
+//! representing tenths of a degree.
+//!
+//! ## Timing
+//! Call [`TemperatureSensorLM25::update`] periodically with `time_ms` and a mutable ADC handle.
+//! The driver reads at most once per `read_rate` milliseconds.
+
+
+use arduino_hal::adc::AdcChannel;
 use arduino_hal::hal::Atmega;
 use arduino_hal::pac::ADC as AdcPeriph;
 use arduino_hal::port::mode::Analog;
 use arduino_hal::port::{Pin, PinOps};
 
 const MAX_INPUT_VALUE: u16 = 1023;
+/// Analog temperature sensor reader (LM25/LM35-style).
+///
+/// Stores the last ADC reading and provides integer+fraction conversions without floats.
+/// Assumes `Vref = 5V` and `10 mV/°C` scale.
+
 pub struct TemperatureSensorLM25<OT> {
     output_pin: Pin<Analog, OT>,
 
@@ -20,6 +43,7 @@ where
     OT: PinOps,
     Pin<Analog, OT>: AdcChannel<Atmega, AdcPeriph>,
 {
+    /// Create a new temperature sensor reader (analog output pin + read rate).
     pub fn new(output_pin: Pin<Analog, OT>, read_rate: u32) -> Self {
         Self {
             output_pin,
@@ -29,6 +53,7 @@ where
             is_read: false,
         }
     }
+    /// Sample the sensor if `read_rate` elapsed (time in ms).
     pub fn update(&mut self, time: u32, adc: &mut arduino_hal::Adc) {
         if (time.wrapping_sub(self.time) >= self.read_rate as u32) {
             self.last_data = adc.read_blocking(&self.output_pin);
@@ -39,6 +64,7 @@ where
         }
     }
 
+    /// True only on the tick when a new reading was taken.
     pub fn is_read(&self) -> bool {
         self.is_read
     }
@@ -59,6 +85,10 @@ where
 
         (t_int, t_frac)
     }
+
+    /// Convert the last reading to Fahrenheit in tenths.
+    ///
+    /// Returns `(int, frac)` where value is `int.frac` °F and `frac` is 0..9.
 
     pub fn to_fahrenheit(&self) -> (u32, u32) {
         let (c_int, c_frac) = self.to_celsius();
