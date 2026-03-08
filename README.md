@@ -5,9 +5,9 @@ Small **Rust + `arduino-hal`** playground for **Arduino Uno** (**ATmega328P @ 16
 Repo layout:
 
 - **Firmware**: `Arduino/` — `#![no_std]` examples + a tiny project-local “mini-std” layer (timer + serial logging).
-- **PC tools**: `Tools/` — helper utilities (e.g. a serial streamer for raw 8‑bit audio). citeturn2view0turn2view1
+- **PC tools**: `Tools/` — helper utilities (e.g. a serial streamer for raw 8‑bit audio).
 
-> Target board: **Arduino Uno / ATmega328P @ 16 MHz**. citeturn11view5
+> Target board: **Arduino Uno / ATmega328P @ 16 MHz**.
 
 ---
 
@@ -22,16 +22,16 @@ cargo run
 
 Notes:
 
-- `Arduino/.cargo/config.toml` sets `target = "avr-none"` and uses **ravedude** as the runner. citeturn11view4
-- This project uses `build-std = ["core"]` for the AVR target. citeturn11view4
-- `GlobalTimer` reconfigures **Timer0** (like Arduino core does). If you rely on Arduino-core `millis()/delay()`, don’t. citeturn7view7
-- Use `wrapping_sub` for time deltas (the millis counter is `u32` and wraps). citeturn7view7turn9view11
+- `Arduino/.cargo/config.toml` sets `target = "avr-none"` and uses **ravedude** as the runner.
+- This project uses `build-std = ["core"]` for the AVR target.
+- `GlobalTimer` reconfigures **Timer0** (like Arduino core does). If you rely on Arduino-core `millis()/delay()`, don’t.
+- Use `wrapping_sub` for time deltas (the millis counter is `u32` and wraps).
 
 ---
 
 ## Prerequisites
 
-1) **Rust nightly** pinned in `Arduino/rust-toolchain.toml`. citeturn2view0
+1) **Rust nightly** pinned in `Arduino/rust-toolchain.toml`.
 
 2) AVR tooling:
 - `avr-gcc`
@@ -39,9 +39,9 @@ Notes:
 - `avrdude`
 
 3) Flasher/runner:
-- `ravedude` citeturn11view4turn11view5
+- `ravedude`
 
-Canonical setup docs: https://github.com/Rahix/avr-hal#readme citeturn1view0
+Canonical setup docs: https://github.com/Rahix/avr-hal#readme
 
 ---
 
@@ -52,7 +52,7 @@ On **Uno/Nano (ATmega328P)**:
 - `SDA` → `A4`
 - `SCL` → `A5`
 
-All I²C devices connect **in parallel** to the same SDA/SCL and share **GND**.  
+All I²C devices connect **in parallel** to the same SDA/SCL and share **GND**.
 Each device must have its own **I²C address**.
 
 ### LCD1602 + I²C backpack (PCF8574)
@@ -61,27 +61,27 @@ Each device must have its own **I²C address**.
 - `SDA` → `A4`
 - `SCL` → `A5`
 
-Common addresses: `0x27`, `0x3F`  
+Common addresses: `0x27`, `0x3F`
 If backlight is on but no text: adjust the **contrast potentiometer**.
 
 ---
 
 ## Firmware modules (expand)
 
-The firmware crate exports modules under `Arduino/src/modules/` and helpers under `Arduino/src/std/`. citeturn11view0turn11view2
+The firmware crate exports modules under `Arduino/src/modules/` and helpers under `Arduino/src/std/`.
 
 ### Tiny “mini-std” layer
 
 <details>
   <summary><b>GlobalTimer</b> — Timer0 millis (CTC + Compare A ISR)</summary>
 
-**What:** global millisecond counter backed by **Timer0** interrupt. citeturn7view7  
+**What:** global millisecond counter backed by **Timer0** interrupt.
 **Why:** schedule periodic tasks without blocking `delay()`.
 
 **Notes**
-- ATmega328P @ 16 MHz, prescaler 64, `OCR0A=249` → ~1 ms tick. citeturn7view7
-- Requires interrupts enabled after init. citeturn7view7turn8view10
-- `u32` wraps naturally → use `wrapping_sub`. citeturn7view7
+- ATmega328P @ 16 MHz, prescaler 64, `OCR0A=249` → ~1 ms tick.
+- Requires interrupts enabled after init.
+- `u32` wraps naturally → use `wrapping_sub`.
 
 **Example**
 ```rust
@@ -105,7 +105,7 @@ loop {
 <details>
   <summary><b>IoUno</b> — UART logger (heapless buffer + newline send)</summary>
 
-**What:** serial logger without `std`, using a `heapless::String<64>` scratch buffer and sending it over **USART0**. citeturn9view13turn9view14
+**What:** serial logger without `std`, using a `heapless::String<64>` scratch buffer and sending it over **USART0**.
 
 **Example**
 ```rust
@@ -125,9 +125,9 @@ io.log(); // sends the buffer + newline
 <details>
   <summary><b>Math helpers</b> — small no_std utilities (internal)</summary>
 
-**What:** `inverse_lerp`, `lerp`, `normalize` (float helpers). citeturn10view7
+**What:** `inverse_lerp`, `lerp`, `normalize` (float helpers).
 
-**Important:** in the current repo `std/math.rs` is a private submodule (`mod math;`), so it is intended for internal use / future re-exporting. citeturn11view2
+**Important:** in the current repo `std/math.rs` is a private submodule (`mod math;`), so it is intended for internal use / future re-exporting.
 </details>
 
 ---
@@ -137,14 +137,14 @@ io.log(); // sends the buffer + newline
 <details>
   <summary><b>LCD1602 (HD44780) over I²C (PCF8574)</b> — blocking + queued (“async”)</summary>
 
-**What:** character LCD driver through an I²C backpack (PCF8574). citeturn7view0turn11view1  
-**Why “slow”:** HD44780 has slow commands (`clear/home` ~1.5ms), and with PCF8574 each character becomes multiple I²C writes (send high nibble + low nibble, each latched by `E`). citeturn7view0turn8view3
+**What:** character LCD driver through an I²C backpack (PCF8574).
+**Why “slow”:** HD44780 has slow commands (`clear/home` ~1.5ms), and with PCF8574 each character becomes multiple I²C writes (send high nibble + low nibble, each latched by `E`).
 
 **API in this repo**
-- `ScreenLCD1602::get_line()` — clears and returns a `heapless::String<64>` scratch buffer. citeturn8view0turn7view0
-- `ScreenLCD1602::print(&mut i2c)` — prints the current buffer, interpreting `\n` as the second row. citeturn7view0turn8view3
-- `EMode::Strait` — blocking (bytes sent immediately). citeturn7view0turn8view3
-- `EMode::Async` — enqueues commands/data; you must call `update(now_ms, &mut i2c)` in the main loop. citeturn7view3turn8view3
+- `ScreenLCD1602::get_line()` — clears and returns a `heapless::String<64>` scratch buffer.
+- `ScreenLCD1602::print(&mut i2c)` — prints the current buffer, interpreting `\n` as the second row.
+- `EMode::Strait` — blocking (bytes sent immediately).
+- `EMode::Async` — enqueues commands/data; you must call `update(now_ms, &mut i2c)` in the main loop.
 
 **Blocking example (Strait)**
 ```rust
@@ -173,7 +173,7 @@ loop {
 ```
 
 **Tips**
-- Right now `print()` always clears the display first. If you call it often, it will feel slow. citeturn8view3
+- Right now `print()` always clears the display first. If you call it often, it will feel slow.
 - If backlight is on but no text: adjust contrast pot + confirm address (`0x27` / `0x3F`).
 
 </details>
@@ -181,7 +181,7 @@ loop {
 <details>
   <summary><b>Joystick HW-504</b> — analog X/Y + optional SW button</summary>
 
-**What:** reads joystick axes via ADC and optional SW button via pull-up. citeturn7view4turn9view10
+**What:** reads joystick axes via ADC and optional SW button via pull-up.
 
 **Wiring (typical)**
 - `VRx` → `A0`, `VRy` → `A1`, `SW` → e.g. `D7` (use pull-up)
@@ -211,10 +211,10 @@ loop {
 <details>
   <summary><b>Light sensor (LDR)</b> — analog read + optional power gating</summary>
 
-**What:** reads an LDR divider via ADC; can optionally power the sensor from a GPIO. citeturn9view0turn9view3
+**What:** reads an LDR divider via ADC; can optionally power the sensor from a GPIO.
 
 **Constructor in this repo**
-- `LightSensorResistor::new(power_pin: Option<OutputPin>, output_pin: AnalogPin, read_rate_ms: u32)` citeturn9view1
+- `LightSensorResistor::new(power_pin: Option<OutputPin>, output_pin: AnalogPin, read_rate_ms: u32)`
 
 **Example (with power gating)**
 ```rust
@@ -239,14 +239,14 @@ loop {
 }
 ```
 
-**Note:** this module’s `MAX_INPUT_VALUE` is currently `512` (project-specific calibration). citeturn7view5turn10view2
+**Note:** this module’s `MAX_INPUT_VALUE` is currently `512` (project-specific calibration).
 </details>
 
 <details>
   <summary><b>BFS Water Sensor</b> — analog + power-gating (anti-corrosion)</summary>
 
-**What:** powers the probe only during read: `HIGH → ADC → LOW`. citeturn7view6turn10view0  
-**Why:** reduces electrolysis/corrosion and noise on exposed-trace sensors. citeturn7view6
+**What:** powers the probe only during read: `HIGH → ADC → LOW`.
+**Why:** reduces electrolysis/corrosion and noise on exposed-trace sensors.
 
 **Example**
 ```rust
@@ -275,8 +275,8 @@ loop {
 <details>
   <summary><b>Analog temperature sensor (LM25/LM35-style)</b> — ADC to °C / °F without floats</summary>
 
-**What:** reads analog temperature and converts using integer math (assumes 10 mV/°C). citeturn6view1turn10view6  
-**API:** `to_celsius() -> (int, frac)` and `to_fahrenheit() -> (int, frac)`. citeturn10view6
+**What:** reads analog temperature and converts using integer math (assumes 10 mV/°C).
+**API:** `to_celsius() -> (int, frac)` and `to_fahrenheit() -> (int, frac)`.
 
 **Example**
 ```rust
@@ -307,7 +307,7 @@ loop {
 <details>
   <summary><b>Serial RAW audio streamer</b> — Tools/MP3_SERIAL_STREAM</summary>
 
-Streams a `*.raw` file (unsigned **u8 mono PCM**) to a serial port at real-time speed. citeturn12view0turn11view7
+Streams a `*.raw` file (unsigned **u8 mono PCM**) to a serial port at real-time speed.
 
 **Run**
 ```bash
@@ -321,7 +321,7 @@ Args:
 2) `FILE`  – path to `*.raw`
 3) `BAUD`  – default `250000`
 4) `RATE`  – samples/sec, default `8000`
-5) `CHUNK` – bytes per write, default `256` citeturn11view7
+5) `CHUNK` – bytes per write, default `256`
 </details>
 
 ---
@@ -334,7 +334,7 @@ Args:
 - Check **GND** (loose ground is #1).
 - Verify SDA/SCL are on **A4/A5** (Uno/Nano).
 - Try the other LCD address (`0x27` ↔ `0x3F`).
-- Keep wires short; if unstable, reduce I²C speed (100 kHz is already used in the firmware examples). citeturn10view11
+- Keep wires short; if unstable, reduce I²C speed (100 kHz is already used in the firmware examples).
 </details>
 
 <details>
@@ -349,13 +349,13 @@ Args:
 
 ## Cross-platform note (Linux/macOS case-sensitive filesystems)
 
-In `Arduino/src/modules/`, module declarations use **snake_case** names (e.g. `pub mod joystick_hw504;`) but some filenames in the repo use mixed case (e.g. `joystick_HW504.rs`). On Windows this usually works; on case-sensitive filesystems it can fail to compile. citeturn4view0turn11view0
+In `Arduino/src/modules/`, module declarations use **snake_case** names (e.g. `pub mod joystick_hw504;`) but some filenames in the repo use mixed case (e.g. `joystick_HW504.rs`). On Windows this usually works; on case-sensitive filesystems it can fail to compile.
 
 If you want this repo to build everywhere, rename the files to match the module names exactly, e.g.:
 
 - `joystick_HW504.rs` → `joystick_hw504.rs`
 - `water_sensor_BFS.rs` → `water_sensor_bfs.rs`
-- `temperature_sensor_LM25.rs` → `temperature_sensor_lm25.rs` citeturn4view0turn11view0
+- `temperature_sensor_LM25.rs` → `temperature_sensor_lm25.rs`
 
 ---
 
@@ -364,7 +364,7 @@ If you want this repo to build everywhere, rename the files to match the module 
 Dual-licensed under either of:
 
 - Apache License 2.0 — `LICENSE-APACHE`
-- MIT License — `LICENSE-MIT` citeturn1view0
+- MIT License — `LICENSE-MIT`
 
 ---
 
