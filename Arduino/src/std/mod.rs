@@ -12,4 +12,5 @@
 pub mod global_timer;
 pub mod std;
 pub mod io;
-mod math;
+pub mod math;
+pub mod extensions;
