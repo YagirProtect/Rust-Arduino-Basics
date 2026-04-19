@@ -59,6 +59,8 @@ pub struct ScreenLCD1602 {
     // async runtime
     q: OpQueue,
     next_ms: u32,
+
+    display_on: bool,
 }
 
 impl ScreenLCD1602 {
@@ -76,6 +78,7 @@ impl ScreenLCD1602 {
             next_ms: 0,
 
             line: String::new(),
+            display_on: true
         };
 
         arduino_hal::delay_ms(50);
@@ -163,13 +166,17 @@ impl ScreenLCD1602 {
     }
 
     /// Turn the display off.
-    pub fn display_off(&mut self, i2c: &mut arduino_hal::I2c) {
+    pub fn display_off(&mut self, i2c: &mut arduino_hal::I2c, is_backlight: bool) {
+        self.backlight = is_backlight;
         self.command(i2c, LcdCmd::DisplayOff);
+        self.display_on = false;
     }
 
     /// Turn the display on.
     pub fn display_on(&mut self, i2c: &mut arduino_hal::I2c) {
+        self.backlight = true;
         self.command(i2c, LcdCmd::DisplayOn);
+        self.display_on = true;
     }
 
     /// Set cursor to point.
@@ -282,6 +289,8 @@ impl ScreenLCD1602 {
 
         v
     }
+
+    pub fn is_display_on(&self) -> bool { self.display_on }
 }
 
 

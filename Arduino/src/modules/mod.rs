@@ -18,3 +18,4 @@ pub mod joystick_hw504;
 pub mod screen_lcd1602;
 pub mod temp_hum_sht31;
 pub mod realtime_ds1302;
+pub mod button;
