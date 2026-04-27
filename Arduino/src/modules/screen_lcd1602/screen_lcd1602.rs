@@ -33,6 +33,9 @@ use core::cmp::PartialEq;
 use embedded_hal::i2c::I2c;
 use heapless::String;
 
+const LCD_CMD_LONG_DELAY_MS: u32 = 2;
+const LCD_ASYNC_STEP_DELAY_MS: u32 = 1;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 /// LCD driver mode.
 ///
@@ -70,7 +73,7 @@ impl ScreenLCD1602 {
     /// followed by function set / display off / clear / entry mode / display on.
 
     pub fn new(addr: u8, i2c: &mut arduino_hal::I2c, mode: EMode) -> Self {
-        let mut screen = Self {
+        let screen = Self {
             addr,
             backlight: true,
             mode,
@@ -112,7 +115,7 @@ impl ScreenLCD1602 {
         if self.mode != EMode::Async {
             return;
         }
-        if now_ms < self.next_ms {
+        if !Self::time_reached(now_ms, self.next_ms) {
             return;
         }
 
@@ -122,18 +125,17 @@ impl ScreenLCD1602 {
         };
 
         match op {
-            Op::WaitMs(ms) => {
-                self.next_ms = now_ms.saturating_add(ms as u32);
-            }
             Op::Cmd(cmd) => {
                 self.command_blocking(i2c, cmd);
-                if cmd == LcdCmd::ClearDisplay as u8 || cmd == LcdCmd::ReturnHome as u8 {
-                    // эти команды реально долгие (~1.5ms)
-                    self.next_ms = now_ms.saturating_add(2);
-                }
+                self.next_ms = if cmd == LcdCmd::ClearDisplay as u8 || cmd == LcdCmd::ReturnHome as u8 {
+                    now_ms.wrapping_add(LCD_CMD_LONG_DELAY_MS)
+                } else {
+                    now_ms.wrapping_add(LCD_ASYNC_STEP_DELAY_MS)
+                };
             }
             Op::Data(b) => {
                 self.send_byte(i2c, b, true);
+                self.next_ms = now_ms.wrapping_add(LCD_ASYNC_STEP_DELAY_MS);
             }
         }
     }
@@ -143,10 +145,7 @@ impl ScreenLCD1602 {
         match self.mode {
             EMode::Linear => self.command_blocking(i2c, cmd as u8),
             EMode::Async => {
-                let _ = self.q.push(Op::Cmd(cmd as u8));
-                if cmd == LcdCmd::ClearDisplay || cmd == LcdCmd::ReturnHome {
-                    let _ = self.q.push(Op::WaitMs(2));
-                }
+                self.enqueue_or_replace(Op::Cmd(cmd as u8));
             }
         }
     }
@@ -192,7 +191,7 @@ impl ScreenLCD1602 {
         match self.mode {
             EMode::Linear => self.command_blocking(i2c, cmd),
             EMode::Async => {
-                let _ = self.q.push(Op::Cmd(cmd));
+                self.enqueue_or_replace(Op::Cmd(cmd));
             }
         }
     }
@@ -203,6 +202,13 @@ impl ScreenLCD1602 {
     /// In async mode, bytes are enqueued (requires [`ScreenLCD1602::update`]).
 
     pub fn print(&mut self, i2c: &mut arduino_hal::I2c) {
+        if self.mode == EMode::Async {
+            // Keep only the newest frame to avoid stale backlog and queue overflows.
+            if !self.q.is_empty() {
+                self.q.clear();
+            }
+            self.next_ms = 0;
+        }
 
         self.clear(i2c);
 
@@ -224,10 +230,10 @@ impl ScreenLCD1602 {
                     // ignore
                 }
                 _ => {
-                    if (self.mode == Linear) {
+                    if self.mode == Linear {
                         self.send_byte(i2c, b, true);
                     }else{
-                        let _ = self.q.push(Op::Data(b));
+                        self.enqueue_or_replace(Op::Data(b));
                     }
 
                     col += 1;
@@ -237,7 +243,7 @@ impl ScreenLCD1602 {
                             col = 0;
                             self.set_cursor(i2c, col, row);
                         } else {
-
+                            break;
                         }
                     }
                 }
@@ -250,7 +256,7 @@ impl ScreenLCD1602 {
     fn command_blocking(&self, i2c: &mut arduino_hal::I2c, cmd: u8) {
         self.send_byte(i2c, cmd, false);
         if cmd == LcdCmd::ClearDisplay as u8 || cmd == LcdCmd::ReturnHome as u8 {
-            arduino_hal::delay_ms(2);
+            arduino_hal::delay_ms(LCD_CMD_LONG_DELAY_MS);
         }
     }
 
@@ -288,6 +294,21 @@ impl ScreenLCD1602 {
         if self.backlight { v |= 1 << 3; } // P3 = Backlight
 
         v
+    }
+
+    fn enqueue_or_replace(&mut self, op: Op) {
+        if self.q.push(op) {
+            return;
+        }
+
+        // If queue is full, drop stale operations and keep the latest request.
+        self.q.clear();
+        self.next_ms = 0;
+        let _ = self.q.push(op);
+    }
+
+    fn time_reached(now: u32, target: u32) -> bool {
+        now.wrapping_sub(target) < 0x8000_0000
     }
 
     pub fn is_display_on(&self) -> bool { self.display_on }

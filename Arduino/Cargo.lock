@@ -105,7 +105,6 @@ dependencies = [
 [[package]]
 name = "avr-hal-generic"
 version = "0.1.0"
-source = "git+https://github.com/rahix/avr-hal?rev=e5c8f37fe48419956e722490a82b9ca9b9fc61a2#e5c8f37fe48419956e722490a82b9ca9b9fc61a2"
 dependencies = [
  "avr-device",
  "embedded-hal 0.2.7",

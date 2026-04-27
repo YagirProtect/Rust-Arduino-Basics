@@ -11,14 +11,18 @@ use crate::std::global_timer::GlobalTimer;
 use crate::std::std::enable_interrupts;
 use arduino_hal::hal::usart::BaudrateArduinoExt;
 use core::fmt::Write;
-use arduino_hal::hal::Atmega;
-use arduino_hal::port::PinOps;
-use avr_device::atmega328p::TWI;
 use embedded_hal::i2c::I2c;
-use ufmt::uwriteln;
 use modules::screen_lcd1602::screen_lcd1602::{EMode, ScreenLCD1602};
 use crate::modules::button::Button;
+use crate::modules::mq135_sensor::Mq135Sensor;
 use crate::std::extensions::str_to_unumber::StrToNumberExt;
+
+use arduino_hal::adc::AdcChannel;
+use arduino_hal::hal::Atmega;
+use arduino_hal::pac::ADC as AdcPeriph;
+use arduino_hal::port::mode::Analog;
+use arduino_hal::port::{Pin, PinOps};
+use crate::modules::heartbeat_diode::HeartbeatDiode;
 
 fn build_datetime() -> DateTime {
     DateTime {
@@ -38,40 +42,45 @@ fn main() -> ! {
     let pins = arduino_hal::pins!(dp);
 
     let mut serial = arduino_hal::default_serial!(dp, pins, 115200);
+    let mut adc = arduino_hal::Adc::new(dp.ADC, Default::default());
 
     let mut i2c = arduino_hal::I2c::new(
         dp.TWI,
         pins.a4.into_pull_up_input(),
         pins.a5.into_pull_up_input(),
-        100_000,
+        50_000,
     );
 
 
-    enable_interrupts();
     let timer = GlobalTimer::new(&dp.TC0);
-
-
-    let mut screen = ScreenLCD1602::new(0x27, &mut i2c, EMode::Async);
-    let mut temp_hum = TemperatureHumiditySensorSHT31::new(0x44, 1000, true);
-
-
-    let clk = pins.d5.into_output();
-    let dat = pins.d6.into_output();
-    let rst = pins.d7.into_output();
-    let mut real_time = RealTimeDS1302::new(clk, dat, rst);
-
 
     let mode_button = Button::new(pins.d4.into_pull_up_input());
 
+    let mut screen = ScreenLCD1602::new(0x27, &mut i2c, EMode::Linear);
+    let mut temp_hum = TemperatureHumiditySensorSHT31::new(0x44, 1000, true);
+    let mut heartbeat_diode = HeartbeatDiode::new(pins.d5.into_output(), 1000);
+
+    // let mq135_ao = pins.a0.into_analog_input(&mut adc);
+    // let mut air_quality = Mq135Sensor::new(mq135_ao, 1000, true);
+
+    // let clk = pins.d5.into_output();
+    // let dat = pins.d6.into_output();
+    // let rst = pins.d7.into_output();
+    // let mut real_time = RealTimeDS1302::new(clk, dat, rst);
+
+
     // real_time.set_time(build_datetime());
     screen.display_on(&mut i2c);
+
+    // Enable global interrupts after all peripheral setup.
+    // If interrupts are left disabled, timer.millis() stops and the app appears "frozen".
+    enable_interrupts();
+
     let mut display_work_time = 0;
 
     let mut override_display_state = true;
 
     let mut last_press_btn_time = 0;
-    
-    let mut last = timer.millis();
 
     let mut last_button_state = false;
 
@@ -82,21 +91,23 @@ fn main() -> ! {
         read_button_and_change_state(&mut i2c, &mut screen, &mode_button, &mut display_work_time, &mut override_display_state, &mut last_press_btn_time, &mut last_button_state, now);
         read_temperature(&mut i2c, &mut screen, &mut temp_hum, now);
         try_draw_on_screen(&mut i2c, &mut screen, &mut temp_hum, &mut display_work_time);
-        update_screen_by_timer(&mut i2c, &mut screen, &mut real_time, &mut display_work_time, override_display_state);
+        update_screen_by_timer(&mut i2c, &mut screen, override_display_state);
+
+        heartbeat_diode.update(now);
 
         screen.update(now, &mut i2c);
 
-        last = now;
     }
 }
 
 fn read_button_and_change_state(mut i2c:  &mut arduino_hal::I2c, screen: &mut ScreenLCD1602, mode_button: &Button<impl PinOps>, display_work_time: &mut i32, override_display_state: &mut bool, last_press_btn_time: &mut u32, last_button_state: &mut bool, now: u32) {
     if (mode_button.is_pressed()) {
+
         if (*last_button_state != mode_button.is_pressed()) {
             *display_work_time = 0;
             screen.display_on(&mut i2c);
 
-            if (now.wrapping_sub(*last_press_btn_time) <= 200) {
+            if (now.wrapping_sub(*last_press_btn_time) <= 500) {
                 *override_display_state = !*override_display_state;
             }
 
@@ -108,20 +119,61 @@ fn read_button_and_change_state(mut i2c:  &mut arduino_hal::I2c, screen: &mut Sc
     }
 }
 
-fn try_draw_on_screen(mut i2c: &mut arduino_hal::I2c, screen: &mut ScreenLCD1602, temp_hum: &mut TemperatureHumiditySensorSHT31, display_work_time: &mut i32) {
-    if (temp_hum.is_read()) {
+fn try_draw_on_screen(
+    i2c: &mut arduino_hal::I2c,
+    screen: &mut ScreenLCD1602,
+    temp_hum: &mut TemperatureHumiditySensorSHT31,
+    display_work_time: &mut i32,
+)
+{
+    if temp_hum.is_read() {
         let temp = temp_hum.get_temp_celsius();
         let hum = temp_hum.get_humidity();
 
-        write!(screen.get_line(), "Temp: {}.{} C\nHum : {}.{} %", temp.0, temp.1, hum.0, hum.1).unwrap();
+        write!(
+            screen.get_line(),
+            "Temp: {:02}.{:02} C\nHum : {:02}.{:02} %",
+            temp.0, temp.1,
+            hum.0, hum.1,
+        ).unwrap();
 
-        screen.print(&mut i2c);
+        // if !air_sensor.baseline_ready() {
+        //     let progress = air_sensor.baseline_progress();
+        //
+        //     write!(
+        //         screen.get_line(),
+        //         "T {:02}.{:02} C|CALIB \nH {:02}.{:02} %|{:02}/{:02} ",
+        //         temp.0, temp.1,
+        //         hum.0, hum.1,
+        //         progress.0, progress.1
+        //     ).unwrap();
+        // } else {
+        //     let air_percent = air_sensor.get_adc_percent();
+        //
+        //     write!(
+        //         screen.get_line(),
+        //         "T {:02}.{:02} C| AIR  \nH {:02}.{:02} %|{:>02}.{}%",
+        //         temp.0, temp.1,
+        //         hum.0, hum.1,
+        //         air_percent.0,
+        //         air_percent.1 / 10
+        //     ).unwrap();
+        // }
+
+
+
+        screen.print(i2c);
 
         *display_work_time += 1;
     }
 }
 
-fn read_temperature(mut i2c: &mut arduino_hal::I2c, screen: &mut ScreenLCD1602, temp_hum: &mut TemperatureHumiditySensorSHT31, now: u32) {
+fn read_temperature(
+    mut i2c: &mut arduino_hal::I2c,
+    screen: &mut ScreenLCD1602,
+    temp_hum: &mut TemperatureHumiditySensorSHT31,
+    now: u32)
+{
     if (screen.is_display_on()) {
         temp_hum.update(now, &mut i2c);
     }
@@ -130,13 +182,9 @@ fn read_temperature(mut i2c: &mut arduino_hal::I2c, screen: &mut ScreenLCD1602, 
 fn update_screen_by_timer(
     mut i2c: &mut arduino_hal::I2c,
     screen: &mut ScreenLCD1602,
-    real_time: &mut RealTimeDS1302<impl PinOps, impl PinOps, impl PinOps>,
-    display_work_time: &mut i32,
     override_display_state: bool
 ) {
-    let time = real_time.read_time();
-
-    if (*display_work_time > 3 && (time.hour >= 21 || time.hour < 9) || override_display_state == false) {
+    if (override_display_state == false) {
         if (screen.is_display_on()){
             screen.clear(&mut i2c);
             screen.display_off(&mut i2c, false);

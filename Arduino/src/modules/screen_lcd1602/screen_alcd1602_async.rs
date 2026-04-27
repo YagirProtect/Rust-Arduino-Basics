@@ -3,7 +3,6 @@
 //! This is a minimal ring buffer used by the LCD driver to enqueue operations without `std`:
 //! - `Cmd(u8)`   — send a command byte (RS=0)
 //! - `Data(u8)`  — send a data byte (RS=1)
-//! - `WaitMs(u16)` — schedule a delay before the next operation
 //!
 //! The main LCD driver calls `pop()` from `update(now_ms, i2c)` and executes at most
 //! one queued operation per call when `now_ms >= next_ms`.
@@ -14,12 +13,10 @@
 pub enum Op {
     Cmd(u8),
     Data(u8),
-
-    WaitMs(u16),
 }
 
 /// Queue capacity (number of operations).
-pub const QN: usize = 32;
+pub const QN: usize = 64;
 
 /// Fixed-size ring buffer for LCD operations.
 ///
@@ -54,7 +51,13 @@ impl OpQueue {
         op
     }
 
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.head == self.tail
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.buf = [None; QN];
+        self.head = 0;
+        self.tail = 0;
     }
 }

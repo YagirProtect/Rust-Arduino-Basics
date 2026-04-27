@@ -63,6 +63,7 @@ impl TemperatureHumiditySensorSHT31 {
                 Err(_) => {
                     self.is_collecting_error = true;
                     self.is_collecting_started = false;
+                    self.time = time;
                 }
             }
         } else {
@@ -79,6 +80,7 @@ impl TemperatureHumiditySensorSHT31 {
                     }
                     Err(_) => {
                         self.is_reading_error = true;
+                        self.time = time;
                     }
                 }
 
