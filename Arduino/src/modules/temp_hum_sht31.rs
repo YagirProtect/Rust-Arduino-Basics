@@ -2,7 +2,6 @@
 
 
 const GET_DATA_DELAY_MS: u32 = 15;
-const MAX_INPUT_VALUE: u16 = 1023;
 
 pub struct TemperatureHumiditySensorSHT31{
     addr: u8,
