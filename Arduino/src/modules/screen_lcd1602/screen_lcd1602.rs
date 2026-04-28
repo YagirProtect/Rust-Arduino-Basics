@@ -26,15 +26,13 @@
 //! `print()` interprets `\n` as move to the second row (`row=1`) and `\r` as ignored.
 
 
-use crate::modules::screen_lcd1602::screen_alcd1602_async::{Op, OpQueue};
+use crate::modules::screen_lcd1602::screen_lcd1602_async::{Op, OpQueue};
 use crate::modules::screen_lcd1602::screen_lcd1602::EMode::Linear;
 use crate::modules::screen_lcd1602::screen_lcd1602cmd::LcdCmd;
 use core::cmp::PartialEq;
 use embedded_hal::i2c::I2c;
 use heapless::String;
-
-const LCD_CMD_LONG_DELAY_MS: u32 = 2;
-const LCD_ASYNC_STEP_DELAY_MS: u32 = 1;
+pub(crate) use crate::modules::screen_lcd1602::screen_lcd1602_recovery::{RecoverModule, LCD_ASYNC_STEP_DELAY_MS, LCD_CMD_LONG_DELAY_MS};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 /// LCD driver mode.
@@ -64,6 +62,7 @@ pub struct ScreenLCD1602 {
     next_ms: u32,
 
     display_on: bool,
+    recovery: Option<RecoverModule>,
 }
 
 impl ScreenLCD1602 {
@@ -72,8 +71,8 @@ impl ScreenLCD1602 {
     /// Performs the standard HD44780 4-bit init ritual (`0x03`×3, then `0x02`),
     /// followed by function set / display off / clear / entry mode / display on.
 
-    pub fn new(addr: u8, i2c: &mut arduino_hal::I2c, mode: EMode) -> Self {
-        let screen = Self {
+    pub fn new(addr: u8, i2c: &mut arduino_hal::I2c, mode: EMode, recovery: Option<RecoverModule>) -> Self {
+        let mut screen = Self {
             addr,
             backlight: true,
             mode,
@@ -81,29 +80,11 @@ impl ScreenLCD1602 {
             next_ms: 0,
 
             line: String::new(),
-            display_on: true
+            display_on: true,
+            recovery,
         };
 
-        arduino_hal::delay_ms(50);
-
-        screen.write4(i2c, LcdCmd::Test as u8, false);
-        arduino_hal::delay_ms(5);
-        screen.write4(i2c, LcdCmd::Test as u8, false);
-        arduino_hal::delay_ms(5);
-        screen.write4(i2c, LcdCmd::Test as u8, false);
-        arduino_hal::delay_ms(1);
-
-        screen.write4(i2c, LcdCmd::ReturnHome as u8, false);
-        arduino_hal::delay_ms(1);
-
-        screen.command_blocking(i2c, LcdCmd::FunctionSet4Bit2Line5x8 as u8);
-        screen.command_blocking(i2c, LcdCmd::DisplayOff as u8);
-
-        screen.command_blocking(i2c, LcdCmd::ClearDisplay as u8);
-        arduino_hal::delay_ms(2);
-
-        screen.command_blocking(i2c, LcdCmd::EntryModeIncNoShift as u8);
-        screen.command_blocking(i2c, LcdCmd::DisplayOn as u8);
+        screen.init_sequence(i2c);
 
         screen
     }
@@ -112,6 +93,8 @@ impl ScreenLCD1602 {
     /// Call this from your main loop. In `Linear` mode this is a no-op.
 
     pub fn update(&mut self, now_ms: u32, i2c: &mut arduino_hal::I2c) {
+        self.set_now(now_ms);
+
         if self.mode != EMode::Async {
             return;
         }
@@ -134,7 +117,7 @@ impl ScreenLCD1602 {
                 };
             }
             Op::Data(b) => {
-                self.send_byte(i2c, b, true);
+                let _ = self.send_byte(i2c, b, true);
                 self.next_ms = now_ms.wrapping_add(LCD_ASYNC_STEP_DELAY_MS);
             }
         }
@@ -157,6 +140,18 @@ impl ScreenLCD1602 {
     pub fn get_line(&mut self) -> &mut String<64>{
         self.line.clear();
         return &mut self.line
+    }
+
+    pub fn set_now(&mut self, now_ms: u32) {
+        if let Some(recovery) = self.recovery.as_mut() {
+            recovery.set_now(now_ms);
+        }
+    }
+
+    pub fn need_recovery(&self) -> bool {
+        self.recovery
+            .as_ref()
+            .map_or(false, |recovery| recovery.need_recovery(self.display_on))
     }
 
     /// Clear the display (`0x01`).
@@ -231,7 +226,7 @@ impl ScreenLCD1602 {
                 }
                 _ => {
                     if self.mode == Linear {
-                        self.send_byte(i2c, b, true);
+                        let _ = self.send_byte(i2c, b, true);
                     }else{
                         self.enqueue_or_replace(Op::Data(b));
                     }
@@ -253,36 +248,63 @@ impl ScreenLCD1602 {
 
     // -------------------- LOW-LEVEL --------------------
 
-    fn command_blocking(&self, i2c: &mut arduino_hal::I2c, cmd: u8) {
-        self.send_byte(i2c, cmd, false);
+    fn command_blocking(&mut self, i2c: &mut arduino_hal::I2c, cmd: u8) {
+        let _ = self.send_byte(i2c, cmd, false);
         if cmd == LcdCmd::ClearDisplay as u8 || cmd == LcdCmd::ReturnHome as u8 {
             arduino_hal::delay_ms(LCD_CMD_LONG_DELAY_MS);
         }
     }
 
-    fn send_byte(&self, i2c: &mut arduino_hal::I2c, b: u8, rs: bool) {
+    fn send_byte(&mut self, i2c: &mut arduino_hal::I2c, b: u8, rs: bool) -> bool {
         let hi = (b >> 4) & 0x0F;
         let lo = b & 0x0F;
-        self.write4(i2c, hi, rs);
-        self.write4(i2c, lo, rs);
+        self.write4(i2c, hi, rs) && self.write4(i2c, lo, rs)
     }
 
-    fn write4(&self, i2c: &mut arduino_hal::I2c, nibble: u8, rs: bool) {
+    fn write4(&mut self, i2c: &mut arduino_hal::I2c, nibble: u8, rs: bool) -> bool {
         let data = self.generate_command(nibble, rs, false);
-        self.expander_write(i2c, data);
-        self.pulse_enable(i2c, data);
+        self.expander_write(i2c, data) && self.pulse_enable(i2c, data)
     }
 
-    fn expander_write(&self, i2c: &mut arduino_hal::I2c, data: u8) {
-        let _ = i2c.write(self.addr, &[data]);
+    fn expander_write(&mut self, i2c: &mut arduino_hal::I2c, data: u8) -> bool {
+        match i2c.write(self.addr, &[data]) {
+            Ok(_) => {
+                if let Some(recovery) = self.recovery.as_mut() {
+                    recovery.mark_i2c_ok();
+                }
+                true
+            }
+            Err(_) => {
+                let need_local_recover = self
+                    .recovery
+                    .as_mut()
+                    .map_or(false, |recovery| recovery.mark_i2c_error_and_need_recover());
+
+                if need_local_recover {
+                    if let Some(recovery) = self.recovery.as_mut() {
+                        recovery.begin_recovery();
+                    }
+                    self.init_sequence(i2c);
+                    if let Some(recovery) = self.recovery.as_mut() {
+                        recovery.finish_recovery();
+                    }
+                }
+                false
+            }
+        }
     }
 
-    fn pulse_enable(&self, i2c: &mut arduino_hal::I2c, data: u8) {
+    fn pulse_enable(&mut self, i2c: &mut arduino_hal::I2c, data: u8) -> bool {
         // E high then low
-        self.expander_write(i2c, data | (1 << 2)); // E=1 (P2)
+        if !self.expander_write(i2c, data | (1 << 2)) {
+            return false;
+        }
         arduino_hal::delay_us(1);
-        self.expander_write(i2c, data & !(1 << 2)); // E=0
+        if !self.expander_write(i2c, data & !(1 << 2)) {
+            return false;
+        }
         arduino_hal::delay_us(50);
+        true
     }
 
     fn generate_command(&self, nibble: u8, rs: bool, rw: bool) -> u8 {
@@ -309,6 +331,42 @@ impl ScreenLCD1602 {
 
     fn time_reached(now: u32, target: u32) -> bool {
         now.wrapping_sub(target) < 0x8000_0000
+    }
+
+    fn init_sequence(&mut self, i2c: &mut arduino_hal::I2c) {
+        arduino_hal::delay_ms(50);
+
+        let _ = self.write4(i2c, LcdCmd::Test as u8, false);
+        arduino_hal::delay_ms(5);
+        let _ = self.write4(i2c, LcdCmd::Test as u8, false);
+        arduino_hal::delay_ms(5);
+        let _ = self.write4(i2c, LcdCmd::Test as u8, false);
+        arduino_hal::delay_ms(1);
+
+        let _ = self.write4(i2c, LcdCmd::ReturnHome as u8, false);
+        arduino_hal::delay_ms(1);
+
+        self.command_blocking(i2c, LcdCmd::FunctionSet4Bit2Line5x8 as u8);
+        self.command_blocking(i2c, LcdCmd::DisplayOff as u8);
+
+        self.command_blocking(i2c, LcdCmd::ClearDisplay as u8);
+        arduino_hal::delay_ms(2);
+
+        self.command_blocking(i2c, LcdCmd::EntryModeIncNoShift as u8);
+        self.command_blocking(i2c, LcdCmd::DisplayOn as u8);
+    }
+
+    pub fn recover(&mut self, i2c: &mut arduino_hal::I2c) {
+        self.q.clear();
+        self.next_ms = 0;
+        if let Some(recovery) = self.recovery.as_mut() {
+            recovery.begin_recovery();
+        }
+        self.init_sequence(i2c);
+        if let Some(recovery) = self.recovery.as_mut() {
+            recovery.finish_recovery();
+        }
+        self.display_on = true;
     }
 
     pub fn is_display_on(&self) -> bool { self.display_on }

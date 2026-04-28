@@ -1,5 +1,18 @@
-﻿pub trait StrToNumberExt {
+//! Lightweight digit-only string to unsigned number conversion.
+//!
+//! Intended for tiny `no_std` use-cases (for example compile-time date/time env strings).
+//! Non-digit characters are ignored.
+
+/// Extension trait for parsing decimal digits from `&str`.
+pub trait StrToNumberExt {
+    /// Parse all digits from string into `u8`.
+    ///
+    /// Non-digit bytes are skipped. Overflow behavior follows `u8` arithmetic.
     fn to_u8(self) -> u8;
+
+    /// Parse all digits from string into `u16`.
+    ///
+    /// Non-digit bytes are skipped. Overflow behavior follows `u16` arithmetic.
     fn to_u16(self) -> u16;
 }
 

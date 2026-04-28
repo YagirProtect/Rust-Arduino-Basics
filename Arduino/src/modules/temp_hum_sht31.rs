@@ -1,9 +1,18 @@
-﻿use arduino_hal::prelude::{_embedded_hal_blocking_i2c_Read, _embedded_hal_blocking_i2c_Write};
+//! SHT31 temperature/humidity sensor driver over I2C.
+//!
+//! The driver uses a two-phase read flow:
+//! 1. Send measurement command (`0x2C, 0x06`)
+//! 2. Wait a short conversion delay, then read 6 bytes
+//!
+//! This module keeps the latest raw values and exposes conversion helpers.
 
+use arduino_hal::prelude::{_embedded_hal_blocking_i2c_Read, _embedded_hal_blocking_i2c_Write};
 
+/// Delay between command and data read for single-shot measurement.
 const GET_DATA_DELAY_MS: u32 = 15;
 
-pub struct TemperatureHumiditySensorSHT31{
+/// SHT31 sensor state and cached readings.
+pub struct TemperatureHumiditySensorSHT31 {
     addr: u8,
     is_read: bool,
     read_rate: u16,
@@ -15,10 +24,15 @@ pub struct TemperatureHumiditySensorSHT31{
     is_collecting_error: bool,
     is_reading_error: bool,
 
-    raw_t: u16, raw_hum: u16
+    raw_t: u16,
+    raw_hum: u16,
 }
 
 impl TemperatureHumiditySensorSHT31 {
+    /// Create a new SHT31 instance.
+    ///
+    /// `addr` is typically `0x44` or `0x45`.
+    /// `read_rate` is the auto-read interval in milliseconds.
     pub fn new(addr: u8, read_rate: u16, is_auto_read: bool) -> Self {
         Self {
             addr,
@@ -35,6 +49,9 @@ impl TemperatureHumiditySensorSHT31 {
         }
     }
 
+    /// Periodic state-machine update.
+    ///
+    /// In auto mode, starts a new measurement every `read_rate` ms.
     pub fn update(&mut self, time: u32, i2c: &mut arduino_hal::I2c) {
         if (self.is_collecting_started && !self.is_collecting_error && !self.is_reading_error) {
             self.read_sensor(time, i2c);
@@ -51,6 +68,8 @@ impl TemperatureHumiditySensorSHT31 {
             }
         }
     }
+
+    /// Manually run one measurement cycle (start or finish, depending on state).
     pub fn read_sensor(&mut self, time: u32, i2c: &mut arduino_hal::I2c) {
         if (self.is_collecting_started == false) {
             match i2c.write(self.addr, &[0x2C, 0x06]) {
@@ -83,19 +102,24 @@ impl TemperatureHumiditySensorSHT31 {
                     }
                 }
 
-
                 self.is_collecting_started = false;
             }
         }
     }
 
-
+    /// True only on update ticks where a new sample was read successfully.
     pub fn is_read(&self) -> bool { self.is_read }
+
+    /// True if the data read phase failed.
     pub fn is_read_error(&self) -> bool { self.is_reading_error }
+
+    /// True if sending the measurement command failed.
     pub fn is_collecting_error(&self) -> bool { self.is_collecting_error }
+
+    /// True while conversion is in progress and waiting for read phase.
     pub fn is_collecting_process(&self) -> bool { self.is_collecting_started }
 
-    ///value/frac
+    /// Temperature in Celsius as `(integer, fractional_2_digits)`.
     pub fn get_temp_celsius(&self) -> (i32, u32) {
         let t_x100 = ((self.raw_t as i32 * 17500 + 32767) / 65535) - 4500;
 
@@ -105,6 +129,7 @@ impl TemperatureHumiditySensorSHT31 {
         (t_int, t_frac)
     }
 
+    /// Temperature in Fahrenheit as `(integer, fractional_2_digits)`.
     pub fn get_temp_fahrenheit(&self) -> (i32, u32) {
         let c_x100 = ((self.raw_t as i32 * 17500 + 32767) / 65535) - 4500;
         let f_x100 = (c_x100 * 9) / 5 + 3200;
@@ -115,6 +140,7 @@ impl TemperatureHumiditySensorSHT31 {
         (f_int, f_frac)
     }
 
+    /// Relative humidity as `(integer, fractional_2_digits)`.
     pub fn get_humidity(&self) -> (u32, u32) {
         let rh_x100 = (self.raw_hum as u32 * 10000 + 32767) / 65535;
 
