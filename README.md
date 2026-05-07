@@ -16,8 +16,7 @@ Repo layout:
 ```bash
 cd Arduino
 # edit Ravedude.toml -> set your serial port (COM5, /dev/ttyACM0, ...)
-cargo build
-cargo run
+cargo run --release
 ```
 
 Notes:
@@ -26,6 +25,7 @@ Notes:
 - This project uses `build-std = ["core"]` for the AVR target.
 - `GlobalTimer` reconfigures **Timer0** (like Arduino core does). If you rely on Arduino-core `millis()/delay()`, don’t.
 - Use `wrapping_sub` for time deltas (the millis counter is `u32` and wraps).
+- `Arduino/build.rs` invokes Python during build to stamp date/time env vars.
 
 ---
 
@@ -38,7 +38,10 @@ Notes:
 - `avr-libc`
 - `avrdude`
 
-3) Flasher/runner:
+3) Build helper:
+- `python` (in `PATH`)
+
+4) Flasher/runner:
 - `ravedude`
 
 Canonical setup docs: https://github.com/Rahix/avr-hal#readme
@@ -334,7 +337,7 @@ Args:
 - Check **GND** (loose ground is #1).
 - Verify SDA/SCL are on **A4/A5** (Uno/Nano).
 - Try the other LCD address (`0x27` ↔ `0x3F`).
-- Keep wires short; if unstable, reduce I²C speed (100 kHz is already used in the firmware examples).
+- Keep wires short; if unstable, reduce I²C speed (for example from 100 kHz to 50 kHz).
 </details>
 
 <details>
@@ -344,18 +347,6 @@ Args:
 - Confirm correct I²C address.
 - Some PCF8574 backpacks use a different pin mapping (rare).
 </details>
-
----
-
-## Cross-platform note (Linux/macOS case-sensitive filesystems)
-
-In `Arduino/src/modules/`, module declarations use **snake_case** names (e.g. `pub mod joystick_hw504;`) but some filenames in the repo use mixed case (e.g. `joystick_HW504.rs`). On Windows this usually works; on case-sensitive filesystems it can fail to compile.
-
-If you want this repo to build everywhere, rename the files to match the module names exactly, e.g.:
-
-- `joystick_HW504.rs` → `joystick_hw504.rs`
-- `water_sensor_BFS.rs` → `water_sensor_bfs.rs`
-- `temperature_sensor_LM25.rs` → `temperature_sensor_lm25.rs`
 
 ---
 
