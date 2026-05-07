@@ -9,21 +9,29 @@
 
 use arduino_hal::port::mode::Output;
 use arduino_hal::port::{mode, Pin, PinOps};
+use crate::modules::realtime_ds::realtime_ds_registers::common::{
+    DAY_MASK,
+    DAY_WEEK_MASK,
+    HOURS_MASK,
+    MINUTES_MASK,
+    MONTH_MASK,
+    SECONDS_MASK,
+    YEAR_MASK,
+};
+use crate::modules::realtime_ds::realtime_ds_registers::ds1302::{
+    CONTROL_WP_BIT,
+    REG_CONTROL,
+    REG_DAY,
+    REG_DAY_WEEK,
+    REG_HOURS,
+    REG_MINUTES,
+    REG_MONTH,
+    REG_SECONDS,
+    REG_YEAR,
+};
+use crate::modules::realtime_ds::date_time::DateTime;
 use crate::std::extensions::binary_to_decimal::BcdExt;
 use crate::std::extensions::str_to_unumber::StrToNumberExt;
-use embedded_hal::digital::{InputPin, OutputPin};
-
-#[derive(Copy, Clone, Default)]
-/// Decimal calendar/time payload.
-pub struct DateTime {
-    pub sec: u8,
-    pub min: u8,
-    pub hour: u8,
-    pub day: u8,         // day of month: 1..31
-    pub day_in_week: u8, // weekday: 1..7
-    pub month: u8,
-    pub year: u8,        // 00..99
-}
 
 /// DS1302 handle with runtime DAT direction switching.
 pub struct RealTimeDS1302<CLK, DAT, RST> {
@@ -33,27 +41,6 @@ pub struct RealTimeDS1302<CLK, DAT, RST> {
     dat_out: Option<Pin<mode::Output, DAT>>,
     dat_in: Option<Pin<mode::Input<mode::Floating>, DAT>>,
 }
-
-// DS1302 command/register bytes
-const REG_SECONDS: u8 = 0x80;
-const REG_MINUTES: u8 = 0x82;
-const REG_HOURS: u8 = 0x84;
-const REG_DAY: u8 = 0x86; // day of month
-const REG_MONTH: u8 = 0x88;
-const REG_DAY_WEEK: u8 = 0x8A; // day of week
-const REG_YEAR: u8 = 0x8C;
-const REG_CONTROL: u8 = 0x8E;
-
-// Masks
-const SECONDS_MASK: u8 = 0x7F; // bit7 = CH
-const MINUTES_MASK: u8 = 0x7F;
-const HOURS_MASK: u8 = 0x3F; // 24-hour mode
-const DAY_MASK: u8 = 0x3F; // 1..31
-const MONTH_MASK: u8 = 0x1F; // 1..12
-const YEAR_MASK: u8 = 0xFF; // 00..99
-const DAY_IN_WEEK_MASK: u8 = 0x07; // 1..7
-
-const CONTROL_WP_BIT: u8 = 0x80;
 
 impl<CLK, DAT, RST> RealTimeDS1302<CLK, DAT, RST>
 where
@@ -88,7 +75,7 @@ where
         self.write_reg(REG_HOURS, dt.hour.dec_to_bdc() & HOURS_MASK);
         self.write_reg(REG_DAY, dt.day.dec_to_bdc() & DAY_MASK);
         self.write_reg(REG_MONTH, dt.month.dec_to_bdc() & MONTH_MASK);
-        self.write_reg(REG_DAY_WEEK, dt.day_in_week.dec_to_bdc() & DAY_IN_WEEK_MASK);
+        self.write_reg(REG_DAY_WEEK, dt.day_in_week.dec_to_bdc() & DAY_WEEK_MASK);
         self.write_reg(REG_YEAR, dt.year.dec_to_bdc() & YEAR_MASK);
 
         self.enable_write(false);
@@ -101,7 +88,7 @@ where
         let hour = (self.read_reg(REG_HOURS) & HOURS_MASK).bdc_to_dec();
         let day = (self.read_reg(REG_DAY) & DAY_MASK).bdc_to_dec();
         let month = (self.read_reg(REG_MONTH) & MONTH_MASK).bdc_to_dec();
-        let day_in_week = (self.read_reg(REG_DAY_WEEK) & DAY_IN_WEEK_MASK).bdc_to_dec();
+        let day_in_week = (self.read_reg(REG_DAY_WEEK) & DAY_WEEK_MASK).bdc_to_dec();
         let year = (self.read_reg(REG_YEAR) & YEAR_MASK).bdc_to_dec();
 
         DateTime {

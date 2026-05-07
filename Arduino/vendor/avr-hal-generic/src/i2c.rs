@@ -109,6 +109,20 @@ pub mod twi_status {
 /// Prevents permanent lock-ups when the I2C bus is stuck.
 pub const TWI_WAIT_RETRIES: u32 = 20_000;
 
+#[macro_export]
+macro_rules! i2c_wait_for_twint {
+    ($self:expr) => {{
+        let mut wait_count: u32 = 0;
+        while $self.twcr().read().twint().bit_is_clear() {
+            wait_count += 1;
+            if wait_count >= $crate::i2c::TWI_WAIT_RETRIES {
+                $self.raw_recover_bus();
+                return Err($crate::i2c::Error::Timeout);
+            }
+        }
+    }};
+}
+
 /// I2C Error
 #[derive(ufmt::derive::uDebug, Debug, Clone, Copy, Eq, PartialEq)]
 #[repr(u8)]
@@ -519,14 +533,7 @@ macro_rules! impl_i2c_twi {
                 self.twcr()
                     .write(|w| w.twen().set_bit().twint().set_bit().twsta().set_bit());
                 // wait()
-                let mut wait_count: u32 = 0;
-                while self.twcr().read().twint().bit_is_clear() {
-                    wait_count += 1;
-                    if wait_count >= $crate::i2c::TWI_WAIT_RETRIES {
-                        self.raw_recover_bus();
-                        return Err($crate::i2c::Error::Timeout);
-                    }
-                }
+                $crate::i2c_wait_for_twint!(self);
 
                 // Validate status
                 match self.twsr().read().tws().bits() {
@@ -553,14 +560,7 @@ macro_rules! impl_i2c_twi {
                 self.twdr().write(|w| unsafe { w.bits(rawaddr) });
                 // transact()
                 self.twcr().write(|w| w.twen().set_bit().twint().set_bit());
-                let mut wait_count: u32 = 0;
-                while self.twcr().read().twint().bit_is_clear() {
-                    wait_count += 1;
-                    if wait_count >= $crate::i2c::TWI_WAIT_RETRIES {
-                        self.raw_recover_bus();
-                        return Err($crate::i2c::Error::Timeout);
-                    }
-                }
+                $crate::i2c_wait_for_twint!(self);
 
                 // Check if the slave responded
                 match self.twsr().read().tws().bits() {
@@ -593,14 +593,7 @@ macro_rules! impl_i2c_twi {
                     self.twdr().write(|w| unsafe { w.bits(*byte) });
                     // transact()
                     self.twcr().write(|w| w.twen().set_bit().twint().set_bit());
-                    let mut wait_count: u32 = 0;
-                    while self.twcr().read().twint().bit_is_clear() {
-                        wait_count += 1;
-                        if wait_count >= $crate::i2c::TWI_WAIT_RETRIES {
-                            self.raw_recover_bus();
-                            return Err($crate::i2c::Error::Timeout);
-                        }
-                    }
+                    $crate::i2c_wait_for_twint!(self);
 
                     match self.twsr().read().tws().bits() {
                         $crate::i2c::twi_status::TW_MT_DATA_ACK => (),
@@ -630,25 +623,11 @@ macro_rules! impl_i2c_twi {
                         self.twcr()
                             .write(|w| w.twint().set_bit().twen().set_bit().twea().set_bit());
                         // wait()
-                        let mut wait_count: u32 = 0;
-                        while self.twcr().read().twint().bit_is_clear() {
-                            wait_count += 1;
-                            if wait_count >= $crate::i2c::TWI_WAIT_RETRIES {
-                                self.raw_recover_bus();
-                                return Err($crate::i2c::Error::Timeout);
-                            }
-                        }
+                        $crate::i2c_wait_for_twint!(self);
                     } else {
                         self.twcr().write(|w| w.twint().set_bit().twen().set_bit());
                         // wait()
-                        let mut wait_count: u32 = 0;
-                        while self.twcr().read().twint().bit_is_clear() {
-                            wait_count += 1;
-                            if wait_count >= $crate::i2c::TWI_WAIT_RETRIES {
-                                self.raw_recover_bus();
-                                return Err($crate::i2c::Error::Timeout);
-                            }
-                        }
+                        $crate::i2c_wait_for_twint!(self);
                     }
 
                     match self.twsr().read().tws().bits() {

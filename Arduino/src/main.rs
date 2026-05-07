@@ -5,18 +5,13 @@ use panic_halt as _;
 mod modules;
 mod std;
 
-use crate::modules::realtime_ds1302::{DateTime};
 use crate::modules::temp_hum_sht31::TemperatureHumiditySensorSHT31;
 use crate::std::global_timer::GlobalTimer;
 use crate::std::std::enable_interrupts;
-use arduino_hal::hal::usart::BaudrateArduinoExt;
 use core::fmt::Write;
 use embedded_hal::i2c::I2c;
 use modules::screen_lcd1602::screen_lcd1602::{EMode, RecoverModule, ScreenLCD1602};
 use crate::modules::button::Button;
-use crate::std::extensions::str_to_unumber::StrToNumberExt;
-
-use arduino_hal::adc::AdcChannel;
 use arduino_hal::port::{PinOps};
 use crate::modules::heartbeat_diode::HeartbeatDiode;
 
@@ -76,7 +71,7 @@ fn main() -> ! {
     }
 }
 
-fn read_button_and_change_state(mut i2c:  &mut arduino_hal::I2c, screen: &mut ScreenLCD1602, mode_button: &Button<impl PinOps>, display_work_time: &mut i32, override_display_state: &mut bool, last_press_btn_time: &mut u32, last_button_state: &mut bool, now: u32) {
+fn read_button_and_change_state(mut i2c: &mut impl I2c, screen: &mut ScreenLCD1602, mode_button: &Button<impl PinOps>, display_work_time: &mut i32, override_display_state: &mut bool, last_press_btn_time: &mut u32, last_button_state: &mut bool, now: u32) {
     if (mode_button.is_pressed()) {
 
         if (*last_button_state != mode_button.is_pressed()) {
@@ -96,7 +91,7 @@ fn read_button_and_change_state(mut i2c:  &mut arduino_hal::I2c, screen: &mut Sc
 }
 
 fn try_draw_on_screen(
-    i2c: &mut arduino_hal::I2c,
+    i2c: &mut impl I2c,
     screen: &mut ScreenLCD1602,
     temp_hum: &mut TemperatureHumiditySensorSHT31,
     display_work_time: &mut i32,
@@ -122,7 +117,7 @@ fn try_draw_on_screen(
 }
 
 fn read_temperature(
-    mut i2c: &mut arduino_hal::I2c,
+    mut i2c: &mut impl I2c,
     screen: &mut ScreenLCD1602,
     temp_hum: &mut TemperatureHumiditySensorSHT31,
     now: u32)
@@ -133,7 +128,7 @@ fn read_temperature(
 }
 
 fn update_screen_by_timer(
-    mut i2c: &mut arduino_hal::I2c,
+    mut i2c: &mut impl I2c,
     screen: &mut ScreenLCD1602,
     override_display_state: bool
 ) {

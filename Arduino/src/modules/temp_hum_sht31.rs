@@ -6,7 +6,7 @@
 //!
 //! This module keeps the latest raw values and exposes conversion helpers.
 
-use arduino_hal::prelude::{_embedded_hal_blocking_i2c_Read, _embedded_hal_blocking_i2c_Write};
+use embedded_hal::i2c::I2c;
 
 /// Delay between command and data read for single-shot measurement.
 const GET_DATA_DELAY_MS: u32 = 15;
@@ -52,7 +52,7 @@ impl TemperatureHumiditySensorSHT31 {
     /// Periodic state-machine update.
     ///
     /// In auto mode, starts a new measurement every `read_rate` ms.
-    pub fn update(&mut self, time: u32, i2c: &mut arduino_hal::I2c) {
+    pub fn update(&mut self, time: u32, i2c: &mut impl I2c) {
         if (self.is_collecting_started && !self.is_collecting_error && !self.is_reading_error) {
             self.read_sensor(time, i2c);
             return;
@@ -70,7 +70,7 @@ impl TemperatureHumiditySensorSHT31 {
     }
 
     /// Manually run one measurement cycle (start or finish, depending on state).
-    pub fn read_sensor(&mut self, time: u32, i2c: &mut arduino_hal::I2c) {
+    pub fn read_sensor(&mut self, time: u32, i2c: &mut impl I2c) {
         if (self.is_collecting_started == false) {
             match i2c.write(self.addr, &[0x2C, 0x06]) {
                 Ok(_) => {
