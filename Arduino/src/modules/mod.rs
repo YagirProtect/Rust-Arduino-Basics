@@ -20,4 +20,4 @@ pub mod temp_hum_sht31;
 pub mod button;
 pub mod mq135_sensor;
 pub mod heartbeat_diode;
-mod realtime_ds;
+pub mod realtime_ds;

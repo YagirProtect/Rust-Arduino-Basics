@@ -1,6 +1,10 @@
 ﻿use std::process::Command;
 
 fn main() {
+    // Force build script rerun on every cargo invocation.
+    // Cargo treats a missing path here as "changed".
+    println!("cargo:rerun-if-changed=.force_rebuild_every_time");
+
     let output = Command::new("python")
         .args([
             "-c",

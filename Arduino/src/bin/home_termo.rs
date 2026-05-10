@@ -1,4 +1,4 @@
-#![no_std]
+﻿#![no_std]
 #![no_main]
 #![feature(abi_avr_interrupt)]
 use panic_halt as _;
@@ -59,8 +59,8 @@ fn main() -> ! {
         try_draw_on_screen(&mut i2c, &mut screen, &mut temp_hum, &mut display_work_time);
         update_screen_by_timer(&mut i2c, &mut screen, override_display_state);
 
-        
-        
+
+
         heartbeat_diode.update(now);
         if screen.need_recovery() {
             screen.recover(&mut i2c);

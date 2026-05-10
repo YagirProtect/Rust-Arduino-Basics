@@ -32,7 +32,9 @@ use crate::modules::screen_lcd1602::screen_lcd1602cmd::LcdCmd;
 use core::cmp::PartialEq;
 use embedded_hal::i2c::I2c;
 use heapless::String;
-pub(crate) use crate::modules::screen_lcd1602::screen_lcd1602_recovery::{RecoverModule, LCD_ASYNC_STEP_DELAY_MS, LCD_CMD_LONG_DELAY_MS};
+pub use crate::modules::screen_lcd1602::screen_lcd1602_recovery::{
+    LCD_ASYNC_STEP_DELAY_MS, LCD_CMD_LONG_DELAY_MS, RecoverModule,
+};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 /// LCD driver mode.
