@@ -4,6 +4,7 @@ use crate::modules::realtime_ds::realtime_ds_registers::common::{
     MINUTES_MASK,
     SECONDS_MASK,
 };
+use crate::modules::realtime_ds::date_time::DateTime;
 use crate::modules::realtime_ds::realtime_ds_registers::ds3231::{
     ALARM_MASK_BIT, 
     CONTROL_A1IE_BIT, 
@@ -76,7 +77,12 @@ impl AlarmModule {
         is_ok
     }
 
-    pub fn set_alarm1_exact(&mut self, i2c: &mut impl I2c, alarm: Alarm1DateTime) -> bool {
+    pub fn set_alarm1_exact<T>(&mut self, i2c: &mut impl I2c, alarm: T) -> bool
+    where
+        T: Into<Alarm1DateTime>,
+    {
+        let alarm = alarm.into();
+
         let day = (alarm.day_or_date.dec_to_bdc() & DAY_MASK)
             | if alarm.day_mode { DY_DT_BIT } else { 0 };
 
@@ -91,7 +97,12 @@ impl AlarmModule {
         i2c.write(self.rtc_addr, &data).is_ok()
     }
 
-    pub fn set_alarm2_exact(&mut self, i2c: &mut impl I2c, alarm: Alarm2DateTime) -> bool {
+    pub fn set_alarm2_exact<T>(&mut self, i2c: &mut impl I2c, alarm: T) -> bool
+    where
+        T: Into<Alarm2DateTime>,
+    {
+        let alarm = alarm.into();
+
         let day = (alarm.day_or_date.dec_to_bdc() & DAY_MASK)
             | if alarm.day_mode { DY_DT_BIT } else { 0 };
 
@@ -220,5 +231,28 @@ impl AlarmModule {
 
     fn write_reg(&self, i2c: &mut impl I2c, reg: u8, value: u8) -> bool {
         i2c.write(self.rtc_addr, &[reg, value]).is_ok()
+    }
+}
+
+impl From<DateTime> for Alarm1DateTime {
+    fn from(value: DateTime) -> Self {
+        Self {
+            sec: value.sec,
+            min: value.min,
+            hour: value.hour,
+            day_or_date: value.day,
+            day_mode: false,
+        }
+    }
+}
+
+impl From<DateTime> for Alarm2DateTime {
+    fn from(value: DateTime) -> Self {
+        Self {
+            min: value.min,
+            hour: value.hour,
+            day_or_date: value.day,
+            day_mode: false,
+        }
     }
 }

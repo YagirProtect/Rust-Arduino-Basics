@@ -12,6 +12,9 @@ use arduino::std::std::enable_interrupts;
 use arduino_hal::port::PinOps;
 use core::fmt::Write;
 use embedded_hal::i2c::I2c;
+use ufmt::uwriteln;
+use arduino::modules::realtime_ds::date_time::DateTime;
+use arduino::modules::realtime_ds::realtime_ds3231::RealTimeDS3231;
 
 #[arduino_hal::entry]
 fn main() -> ! {
@@ -37,6 +40,9 @@ fn main() -> ! {
     let mut temp_hum = TemperatureHumiditySensorSHT31::new(0x44, 1000, true);
     let mut heartbeat_diode = HeartbeatDiode::new(pins.d5.into_output(), 1000);
 
+    let mut realtime = RealTimeDS3231::new(0x68, None);
+    realtime.set_time(&mut i2c, DateTime::now().normalized());
+
     screen.display_on(&mut i2c);
 
     enable_interrupts();
@@ -53,13 +59,21 @@ fn main() -> ! {
         let now = timer.millis();
         screen.set_now(now);
 
+        let hour = match realtime.read_time(&mut i2c) {
+            None => {
+                12
+            }
+            Some(e) => {
+
+                // uwriteln!(&mut serial, "Date: {},{},{}", e.hour, e.min, e.sec).unwrap();
+                e.hour
+            }
+        };
 
         read_button_and_change_state(&mut i2c, &mut screen, &mode_button, &mut display_work_time, &mut override_display_state, &mut last_press_btn_time, &mut last_button_state, now);
         read_temperature(&mut i2c, &mut screen, &mut temp_hum, now);
         try_draw_on_screen(&mut i2c, &mut screen, &mut temp_hum, &mut display_work_time);
-        update_screen_by_timer(&mut i2c, &mut screen, override_display_state);
-
-
+        update_screen_by_timer(&mut i2c, &mut screen, override_display_state, hour, display_work_time);
 
         heartbeat_diode.update(now);
         if screen.need_recovery() {
@@ -71,13 +85,17 @@ fn main() -> ! {
 
 fn read_button_and_change_state(mut i2c: &mut impl I2c, screen: &mut ScreenLCD1602, mode_button: &Button<impl PinOps>, display_work_time: &mut i32, override_display_state: &mut bool, last_press_btn_time: &mut u32, last_button_state: &mut bool, now: u32) {
     if (mode_button.is_pressed()) {
-
         if (*last_button_state != mode_button.is_pressed()) {
             *display_work_time = 0;
-            screen.display_on(&mut i2c);
 
             if (now.wrapping_sub(*last_press_btn_time) <= 500) {
                 *override_display_state = !*override_display_state;
+            } else if (*override_display_state == false) {
+                *override_display_state = true;
+            }
+
+            if (*override_display_state) {
+                screen.display_on(&mut i2c);
             }
 
             *last_press_btn_time = now;
@@ -128,9 +146,11 @@ fn read_temperature(
 fn update_screen_by_timer(
     mut i2c: &mut impl I2c,
     screen: &mut ScreenLCD1602,
-    override_display_state: bool
+    override_display_state: bool,
+    hour: u8,
+    display_work_time: i32
 ) {
-    if (override_display_state == false) {
+    if (override_display_state == false || ((hour < 9 || hour >= 21) && display_work_time > 3)) {
         if (screen.is_display_on()){
             screen.clear(&mut i2c);
             screen.display_off(&mut i2c, false);

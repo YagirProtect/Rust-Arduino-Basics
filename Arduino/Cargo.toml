@@ -5,10 +5,10 @@ authors = ["YagirProtect <xhrkshbi@gmail.com>"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
-[[bin]]
-name = "arduino"
-test = false
-bench = false
+#[[bin]]
+#name = "arduino"
+#test = false
+#bench = false
 
 [dependencies]
 panic-halt = "1.0.0"
