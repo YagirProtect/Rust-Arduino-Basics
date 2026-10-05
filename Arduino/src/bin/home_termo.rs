@@ -5,6 +5,7 @@ use panic_halt as _;
 
 use arduino::modules::button::Button;
 use arduino::modules::heartbeat_diode::HeartbeatDiode;
+use arduino::modules::scd40_sensor::Scd40Sensor;
 use arduino::modules::screen_lcd1602::screen_lcd1602::{EMode, RecoverModule, ScreenLCD1602};
 use arduino::modules::temp_hum_sht31::TemperatureHumiditySensorSHT31;
 use arduino::std::global_timer::GlobalTimer;
@@ -38,10 +39,11 @@ fn main() -> ! {
 
     let mut screen = ScreenLCD1602::new(0x27, &mut i2c, EMode::Linear, Some(RecoverModule::recommended()));
     let mut temp_hum = TemperatureHumiditySensorSHT31::new(0x44, 1000, true);
+    let mut co2_sensor = Scd40Sensor::new(0x62, 1000);
     let mut heartbeat_diode = HeartbeatDiode::new(pins.d5.into_output(), 1000);
 
     let mut realtime = RealTimeDS3231::new(0x68, None);
-    realtime.set_time(&mut i2c, DateTime::now().normalized());
+    // realtime.set_time(&mut i2c, DateTime::now().normalized());
 
     screen.display_on(&mut i2c);
 
@@ -72,7 +74,8 @@ fn main() -> ! {
 
         read_button_and_change_state(&mut i2c, &mut screen, &mode_button, &mut display_work_time, &mut override_display_state, &mut last_press_btn_time, &mut last_button_state, now);
         read_temperature(&mut i2c, &mut screen, &mut temp_hum, now);
-        try_draw_on_screen(&mut i2c, &mut screen, &mut temp_hum, &mut display_work_time);
+        read_co2(&mut i2c, &mut screen, &mut co2_sensor, now);
+        try_draw_on_screen(&mut i2c, &mut screen, &mut temp_hum, &mut co2_sensor, &mut display_work_time);
         update_screen_by_timer(&mut i2c, &mut screen, override_display_state, hour, display_work_time);
 
         heartbeat_diode.update(now);
@@ -110,18 +113,24 @@ fn try_draw_on_screen(
     i2c: &mut impl I2c,
     screen: &mut ScreenLCD1602,
     temp_hum: &mut TemperatureHumiditySensorSHT31,
+    co2_sensor: &mut Scd40Sensor,
     display_work_time: &mut i32,
 )
 {
     if temp_hum.is_read() {
         let temp = temp_hum.get_temp_celsius();
         let hum = temp_hum.get_humidity();
+        let temp_d1 = temp.1 / 10;
+        let hum_d1 = hum.1 / 10;
+
+        let mut co2_ppm = co2_sensor.get_co2_ppm() as u32;
 
         let is_writed = write!(
             screen.get_line(),
-            "Temp: {:02}.{:02} C\nHum : {:02}.{:02} %",
-            temp.0, temp.1,
-            hum.0, hum.1,
+            "T: {:02}.{} C | CO \nH: {:02}.{} % |{:04}",
+            temp.0, temp_d1,
+            hum.0, hum_d1,
+            co2_ppm,
         ).is_ok();
 
         if is_writed {
@@ -140,6 +149,17 @@ fn read_temperature(
 {
     if (screen.is_display_on()) {
         temp_hum.update(now, &mut i2c);
+    }
+}
+
+fn read_co2(
+    mut i2c: &mut impl I2c,
+    screen: &mut ScreenLCD1602,
+    co2_sensor: &mut Scd40Sensor,
+    now: u32)
+{
+    if (screen.is_display_on()) {
+        co2_sensor.update(now, &mut i2c);
     }
 }
 

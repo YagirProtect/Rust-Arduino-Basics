@@ -17,6 +17,7 @@ pub mod temperature_sensor_lm25;
 pub mod joystick_hw504;
 pub mod screen_lcd1602;
 pub mod temp_hum_sht31;
+pub mod scd40_sensor;
 pub mod button;
 pub mod mq135_sensor;
 pub mod heartbeat_diode;
